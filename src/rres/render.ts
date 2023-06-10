@@ -188,7 +188,7 @@ class MaterialInstance {
             this.materialHelper.createProgram();
     }
 
-    public setSortKeyLayer(layer: GfxRendererLayer): void {
+    public setSortKeyLayer(layer: number): void {
         if (this.materialData.material.translucent)
             layer |= GfxRendererLayer.TRANSLUCENT;
         this.sortKey = makeSortKey(layer);
@@ -318,7 +318,7 @@ class MaterialInstance {
         mat4.mul(dstPost, matrixScratch, dstPost);
     }
 
-    private calcColor(materialParams: MaterialParams, i: ColorKind, fallbackColor: Color, a: BRRES.AnimatableColor): void {
+    private calcColor(materialParams: MaterialParams, i: ColorKind, fallbackColor: Color, a: BRRES.AnimatableColor | -1): void {
         const dst = materialParams.u_Color[i];
         let color: Color;
         if (this.modelInstance && this.modelInstance.colorOverrides[i]) {
@@ -494,14 +494,8 @@ export class MDL0ModelInstance {
         this.execDrawOpList(this.mdl0Model.mdl0.sceneGraph.drawOpaOps, false);
         this.execDrawOpList(this.mdl0Model.mdl0.sceneGraph.drawXluOps, true);
     }
-    public getNodeToWorldMatrixRefernce(nodeName : string): mat4 {
-        const nodes = this.mdl0Model.mdl0.nodes;
-        for (let i = 0; i < nodes.length; i++)
-            if (nodes[i].name === nodeName)
-                return this.instanceStateData.jointToWorldMatrixArray[nodes[i].mtxId];
-        throw "could not find node";
-    }
-    public setSortKeyLayer(layer: GfxRendererLayer): void {
+
+    public setSortKeyLayer(layer: number): void {
         for (let i = 0; i < this.materialInstances.length; i++)
             this.materialInstances[i].setSortKeyLayer(layer);
     }

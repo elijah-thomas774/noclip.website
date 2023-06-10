@@ -77,6 +77,7 @@ interface RoomLayout {
 
 interface BZS {
     layouts: RoomLayout[];
+    areaType: number;
 }
 
 class ResourceSystem {
@@ -148,6 +149,12 @@ class ZSSTextureHolder extends RRESTextureHolder {
     }
 }
 
+interface ModelToModelNodeBind_Info {
+    model : MDL0ModelInstance;
+    modelToBindTo : MDL0ModelInstance;
+    nodeName : string;
+};
+
 class SkywardSwordRenderer implements Viewer.SceneGfx {
     public textureHolder: RRESTextureHolder;
     public animationController: AnimationController;
@@ -164,8 +171,8 @@ class SkywardSwordRenderer implements Viewer.SceneGfx {
     private whiteTexture: GfxTexture;
     public currentLayer : number = 0;
     public layerModels : MDL0ModelInstance[][] = [];
-
     public modelInstances: MDL0ModelInstance[] = [];
+    public modelBinds: ModelToModelNodeBind_Info[] = [];
     public otherTextureHolders : RRESTextureHolder[];
     constructor(device: GfxDevice, public stageId: string, public systemArchive: U8.U8Archive, public objPackArchive: U8.U8Archive, public stageArchive: U8.U8Archive, public layerArchives: (U8.U8Archive)[] = [], public layerNums: number[]) {
         this.renderHelper = new GXRenderHelperGfx(device);
@@ -189,6 +196,7 @@ class SkywardSwordRenderer implements Viewer.SceneGfx {
         this.textureHolder.setTextureOverride('LmChaAdd', { gfxTexture: this.blackTexture, width: 1, height: 1, flipY: false });
         this.textureHolder.setTextureOverride('LmBGAdd', { gfxTexture: this.blackTexture, width: 1, height: 1, flipY: false });
         this.textureHolder.setTextureOverride('F200_cmn_Gradation', { gfxTexture: this.whiteTexture, width: 8, height: 64, flipY: true });
+        this.textureHolder.setTextureOverride('D200_cmn_Gradation', { gfxTexture: this.whiteTexture, width: 8, height: 64, flipY: true });
         this.textureHolder.setTextureOverride('LmChaSkin', { gfxTexture: this.blackTexture, width: 1, height: 1, flipY: false });
         
         this.resourceSystem.getRRES(device, this.textureHolder, 'oarc/SkyCmn.arc');
@@ -364,19 +372,21 @@ class SkywardSwordRenderer implements Viewer.SceneGfx {
         this.modelCache.destroy(device);
         device.destroyTexture(this.blackTexture);
     }
-
     public render(device: GfxDevice, viewerInput: Viewer.ViewerRenderInput) {
+        
         const renderInstManager = this.renderHelper.renderInstManager;
         const builder = this.renderHelper.renderGraph.newGraphBuilder();
 
         this.animationController.setTimeInMilliseconds(viewerInput.time);
         const template = this.renderHelper.pushTemplateRenderInst();
 
-        
         fillSceneParamsDataOnTemplate(template, viewerInput);
         for (let i = 0; i < this.modelInstances.length; i++){
             this.modelInstances[i].prepareToRender(device, this.renderHelper.renderInstManager, viewerInput);
         }
+        this.modelBinds.forEach( value => {
+            value.model.modelMatrix = value.modelToBindTo.getNodeToWorldMatrixRefernce(value.nodeName);
+        });        
         this.renderHelper.renderInstManager.popTemplateRenderInst();
         
         const mainColorDesc = makeBackbufferDescSimple(GfxrAttachmentSlot.Color0, viewerInput, standardFullClearRenderPassDescriptor);
@@ -428,6 +438,9 @@ class SkywardSwordRenderer implements Viewer.SceneGfx {
         renderInstManager.resetRenderInsts();
     }
 
+    private findNode(m: MDL0ModelInstance, name: string): BRRES.MDL0_NodeEntry | undefined {
+        return m.mdl0Model.mdl0.nodes.find(node=>node.name===name);
+    }
     private spawnObj(device: GfxDevice, obj: BaseObj, modelMatrix: mat4): void {
         // In the actual engine, each obj is handled by a separate .rel (runtime module)
         // which knows the actual layout. The mapping of obj name to .rel is stored in main.dol.
@@ -436,7 +449,8 @@ class SkywardSwordRenderer implements Viewer.SceneGfx {
         const name = obj.name, params1 = obj.unk1, params2 = obj.unk2, rotx = obj.rotX, rotz = obj.rotZ;        
 
         
-        // TODO look at - EffGnT, SpiderL, V_Clip, Fmaker (fire), 'PltChg', (pallet Change?), SparkTg and SpkTg2, 
+        // TODO look at - EffGnT, SpiderL, V_Clip, Fmaker (fire), 'PltChg', (pallet Change? point light change?), SparkTg and SpkTg2, 
+        //                 Plight? - Pillar light? point light?
         // TODO add MassTag (Grass)
         const NO_MODEL_LIST = ['ScChang', 'MapArea', 'MapMark', 'Cam2Tag', 'EvntTag', 'CharE', 'CharD', 'Fmaker',
         'TgReact', 'WoodTg2', 'FairyTa', 'TlpTag', 'NpcTke', 'RoAtLog', 'EffGnT', 'NpcSalS', 'SporeTg', 'Kytag',
@@ -472,7 +486,7 @@ class SkywardSwordRenderer implements Viewer.SceneGfx {
             if (mdl0.name.endsWith('_s') || ['FXLightShaft', 'StageF000Light','MoundShovelD00', 'HoleShovelB', 'MoundShovel'].includes(mdl0.name))
             modelRenderer.setSortKeyLayer(GfxRendererLayer.TRANSLUCENT + 1);
             
-            if (!['GoddessCube', 'TBoxNormalT', 'TBoxSmallT', 'TBoxBossT'].includes(mdl0.name)) // prevents some animations from instantly applying
+            if (!['GoddessCube', 'TBoxNormalT', 'TBoxSmallT', 'TBoxBossT', 'DoorBoss'].includes(mdl0.name)) // prevents some animations from instantly applying
             modelRenderer.bindRRESAnimations(this.animationController, rres);
             
             // TODO(jstpierre): Figure out how these MA animations work.
@@ -803,50 +817,44 @@ class SkywardSwordRenderer implements Viewer.SceneGfx {
             const bossLockModel = ['BossLockLv1', 'BossLockLv2', 'BossLock1C', 'BossLock2B', 'BossLock2C'][bossLockIdx]; // has LR
             const keyHoleModel = ['BossKeyhole1A', 'BossKeyhole1B', 'BossKeyhole1C', '-', 'BossKeyhole2B', 'BossKeyhole2C' ][dungeonNum]; // has LR
             
-            const genBossDoor = spawnOArcModel('DoorBoss');
-            let mdl;
+            const bossDoorAnim = spawnOArcModel('DoorBoss');
+            bossDoorAnim.bindRRESAnimations(this.animationController, getOArcRRES("DoorBoss"), "DoorBoss_Open");
             // Spawn Keyhole
             if (dungeonNum != 3) // Ancient Cistern
             {
-                let m : MDL0ModelInstance;
+                let doorL, doorR, lockL, lockR, holeL, holeR : MDL0ModelInstance;
                 // Spawn Door
-                m = spawnModelFromNames(bossDoorModel, bossDoorModel+'L');
-                translateModel(m, [300,550,0]);
-                m = spawnModelFromNames(bossDoorModel, bossDoorModel+'R');
-                translateModel(m, [-300,550,0]);
+                doorL = spawnModelFromNames(bossDoorModel, bossDoorModel+'L');
+                doorR = spawnModelFromNames(bossDoorModel, bossDoorModel+'R');
                 // Spawn Lock
-                m = spawnModelFromNames(bossLockOarc, bossLockModel+'L');
-                translateModel(m, [0,300,0]);
-                m = spawnModelFromNames(bossLockOarc, bossLockModel+'R');
-                translateModel(m, [0,300,0]);
+                lockL = spawnModelFromNames(bossLockOarc, bossLockModel+'L');
+                lockR = spawnModelFromNames(bossLockOarc, bossLockModel+'R');
                 // Spawn Keyhole
-                m = spawnModelFromNames(keyHoleModel, keyHoleModel+'L');
-                translateModel(m, [0,300,110]);
-                m = spawnModelFromNames(keyHoleModel, keyHoleModel+'R');
-                translateModel(m, [0,300,110]);
+                holeL = spawnModelFromNames(keyHoleModel, keyHoleModel+'L');
+                holeR = spawnModelFromNames(keyHoleModel, keyHoleModel+'R');
+                this.modelBinds.push({model: doorL, modelToBindTo: bossDoorAnim, nodeName: "DoorBossL"})
+                this.modelBinds.push({model: doorR, modelToBindTo: bossDoorAnim, nodeName: "DoorBossR"})
+                this.modelBinds.push({model: lockL, modelToBindTo: bossDoorAnim, nodeName: "LockL"})
+                this.modelBinds.push({model: lockR, modelToBindTo: bossDoorAnim, nodeName: "LockR"})
+                this.modelBinds.push({model: holeL, modelToBindTo: bossDoorAnim, nodeName: "KeyholeL"})
+                this.modelBinds.push({model: holeR, modelToBindTo: bossDoorAnim, nodeName: "KeyholeR"})
             }
             else {
                 // Cistern is *Special*
                 spawnModelFromNames('BossLockD101', 'BossLockD101');
 
             }
-            if (dungeonNum == 2) { // LMF preset doors....
-                let m : MDL0ModelInstance;
+            if (dungeonNum == 2) { // LMF present doors....
+                let doorL, doorR, lockL, lockR, holeL, holeR : MDL0ModelInstance;
                 // Spawn Door
-                m = spawnModelFromNames(bossDoorModel, bossDoorModel+'NL');
-                translateModel(m, [300,550,0]);
-                m = spawnModelFromNames(bossDoorModel, bossDoorModel+'NR');
-                translateModel(m, [-300,550,0]);
+                doorL = spawnModelFromNames(bossDoorModel, bossDoorModel+'NL');
+                doorR = spawnModelFromNames(bossDoorModel, bossDoorModel+'NR');
                 // Spawn Lock
-                m = spawnModelFromNames(bossLockOarc, bossLockModel+'LN');
-                translateModel(m, [0,300,0]);
-                m = spawnModelFromNames(bossLockOarc, bossLockModel+'RN');
-                translateModel(m, [0,300,0]);
+                lockL = spawnModelFromNames(bossLockOarc, bossLockModel+'LN');
+                lockR = spawnModelFromNames(bossLockOarc, bossLockModel+'RN');
                 // Spawn Keyhole
-                m = spawnModelFromNames(keyHoleModel, keyHoleModel+'LN');
-                translateModel(m, [0,300,110]);
-                m = spawnModelFromNames(keyHoleModel, keyHoleModel+'RN');
-                translateModel(m, [0,300,110]);
+                holeL = spawnModelFromNames(keyHoleModel, keyHoleModel+'LN');
+                holeR = spawnModelFromNames(keyHoleModel, keyHoleModel+'RN');
                 this.pastModelNames.push(bossDoorModel+'L');
                 this.pastModelNames.push(bossDoorModel+'R');
                 this.pastModelNames.push(bossLockModel+'L');
@@ -859,6 +867,12 @@ class SkywardSwordRenderer implements Viewer.SceneGfx {
                 this.presentModelNames.push(bossLockModel+'RN');
                 this.presentModelNames.push(keyHoleModel+'LN');
                 this.presentModelNames.push(keyHoleModel+'RN');
+                this.modelBinds.push({model: doorL, modelToBindTo: bossDoorAnim, nodeName: "DoorBossL"})
+                this.modelBinds.push({model: doorR, modelToBindTo: bossDoorAnim, nodeName: "DoorBossR"})
+                this.modelBinds.push({model: lockL, modelToBindTo: bossDoorAnim, nodeName: "LockL"})
+                this.modelBinds.push({model: lockR, modelToBindTo: bossDoorAnim, nodeName: "LockR"})
+                this.modelBinds.push({model: holeL, modelToBindTo: bossDoorAnim, nodeName: "KeyholeL"})
+                this.modelBinds.push({model: holeR, modelToBindTo: bossDoorAnim, nodeName: "KeyholeR"})
             }
         // The Big Lily Pads
         } else if (name === 'Lotus'){
@@ -880,15 +894,62 @@ class SkywardSwordRenderer implements Viewer.SceneGfx {
         // Bocoblins
         } else if (name === 'EBc'){
             const bcRRES = getOArcRRES('Bc');
-            const variant = (params1)&3;
-            const anotherChoice = (params1>>24)&0xF;
-            let bcName = ['BocoburinM', 'Bocoburin_A', 'BocoburinB'][variant];
-            if (anotherChoice === 9)
-                bcName = ['BocoburinB', 'Bocoburin_A', 'BocoburinG'][variant];
+            const variant = (params1>>>0)&3;
+            const bokoConfig = (params1>>24)&0xF;
+            let color = [1,0,2][variant];
+            if (variant === 1 && (['D200', 'D301'].includes(this.stageId) || ![1,2].includes(this.stageBZS!.areaType))) color = 1;
+            let bcName = ['BocoburinG', 'BocoburinM', 'BocoburinB'][color];
+            if (bokoConfig === 9)
+                bcName = ['BocoburinG', 'Bocoburin_A', 'BocoburinB'][color];
             const mdl = spawnModel(bcRRES, bcName);
-            mdl.bindPAT0(this.animationController, findPAT0(bcRRES, 'wink'));
+            mdl.bindPAT0(this.animationController, findPAT0(bcRRES, `Bocoburin${['G','A','B'][color]}Wink`));
             mdl.bindCHR0(this.animationController, findCHR0(bcRRES, 'wait'));
             scaleModelConstant(mdl, 1.1);
+            let weaponIdx = -1;
+            // Weapon
+            if (bokoConfig == 9) {
+                // Bow
+                const bowMdl = spawnModel(bcRRES, color == 0 ? 'BocoburinGBow' : 'bow');
+                this.modelBinds.push({model: bowMdl, modelToBindTo: mdl, nodeName: 'hand_L'})
+            } else if (color == 0) {
+                weaponIdx = 4;
+            } else if (color == 2) {
+                weaponIdx = 3;
+            } else if (bokoConfig == 2 || bokoConfig == 8) {
+                weaponIdx = 2;
+            } else if (bokoConfig != 4) {
+                weaponIdx = 1;
+            }
+            else {
+                const weaponMdl = spawnModel(bcRRES, 'BocoburinRantan');
+                this.modelBinds.push({model: weaponMdl, modelToBindTo: mdl, nodeName: 'hand_R'})
+                mdl.bindCHR0(this.animationController, findCHR0(bcRRES, 'Rwait'));   
+            }
+            if (weaponIdx != -1)
+            {
+                const weaponName = `Bocoburin${['SwordA', 'Stick', 'BSword','GSword'][weaponIdx-1]}`;
+                const weaponMdl = spawnModel(bcRRES, weaponName);
+                this.modelBinds.push({model: weaponMdl, modelToBindTo: mdl, nodeName: 'hand_R'})
+            }
+            // Headpiece
+            if (variant != 0 && color != 0)
+            {
+                const headcloth = spawnModel(bcRRES, `Bocoburin${['M','M','B'][color]}Headcloth`);
+                this.modelBinds.push({model: headcloth, modelToBindTo: mdl, nodeName: 'head'})
+            }
+            // Belt item
+            const beltItem = ["None", 'Horn', 'Key'][(params1 >>> 2) & 3];
+            if (beltItem != "None")
+            {
+                if (beltItem === 'Key') {
+                    const keyMdl = spawnModel(bcRRES, "KeySmall");
+                    this.modelBinds.push({model: keyMdl, modelToBindTo: mdl, nodeName: 'pipe_loc'})
+                }
+                else {
+                    const pipemdl = spawnModel(bcRRES, "BocoburinPipe");
+                    this.modelBinds.push({model: pipemdl, modelToBindTo: mdl, nodeName: 'pipe_loc'})
+                }
+            }
         }
         // Mark for Farores and Dins Flame 
         else if (name === 'GodMark'){
@@ -923,8 +984,20 @@ class SkywardSwordRenderer implements Viewer.SceneGfx {
             console.info('Revisit Bamboo Later'); // Done show up right
             const type = (params1 >>> 5) & 0xF;
             const arc = ['None','TreeLong00', 'KanbanTree', 'TreeLongBamboo','TreeLong01', 'TreeLongSky'][type];
-            const model = ['None', 'TreeLong00', 'None', 'None', 'TreeLong01', 'TreeLongSky'][type];
+            const model1 = ['None', 'TreeLong00', 'None', 'None', 'TreeLong01', 'TreeLongSky'][type];
             const model2 = ['None', 'TreeLong00Cutmark', 'None', 'None', 'TreeLong01Cutmark', 'TreeLongSkyCutmark'][type];
+            // if (arc != 'None') 
+            // {
+            //     const rres = getOArcRRES(arc);
+            //     if (model1 != 'None')
+            //     {
+            //         const m = spawnModel(rres, model1);
+            //         translateModel(m, [0, 100, 0]);
+            //     }
+            //     const m2 = spawnModel(rres, "TreeLongSkySpike");
+            //     translateModel(m2, [0, 50, 0]);
+            //     spawnModelFromNames('TreeLongSky', 'TreeLongSkyCutmark');
+            // }
         }
         // Low Poly Islands
         else if (name === 'IslLOD') {
@@ -1065,6 +1138,7 @@ class SkywardSwordRenderer implements Viewer.SceneGfx {
         // LumpPumpkin
         else if (name === 'PumpBar') {
             spawnModelFromNames('IslBar', 'IslBar');
+            spawnModelFromNames('IslBar', 'IslBar_L');
         }
         // THe ring on Fun Fun Island
         else if (name === 'RouletR') {
@@ -1220,6 +1294,8 @@ class SkywardSwordRenderer implements Viewer.SceneGfx {
             const arcName = 'Lord';
             const rres = getOArcRRES(arcName);
             const m = spawnOArcModel(arcName);
+            const swordMdl = spawnModel(rres, "SwordLord");
+            this.modelBinds.push({ model: swordMdl, modelToBindTo: m, nodeName: "SwordH"});
             translateModel(m, [0,18,0]);
             const chr = mergeCHR0(rres, 'Lord_wait', 'Lord_F_wait');
             m.bindRRESAnimations(this.animationController, rres, 'Lord_wait');
@@ -1387,7 +1463,6 @@ class SkywardSwordRenderer implements Viewer.SceneGfx {
                     case 27: arcModelPair = ['GetMedal', 'GetMedalReturn']; break;
                 }
                 const m = spawnModelFromNames(arcModelPair![0], arcModelPair![1]);
-                translateModel(m, [0,25,0]);
                 scaleModelConstant(m, 1.7);
             }
         }
@@ -1413,14 +1488,20 @@ class SkywardSwordRenderer implements Viewer.SceneGfx {
             else if (type === 4){
                 const rres = getOArcRRES('Junk');
                 const m = spawnModel(rres, 'Junk');
+                const driver = spawnModel(rres, 'JunkDriver');
+                const chair = spawnModel(rres, 'Junk_chair');
                 const chr = mergeCHR0(rres, 'Junk_wait', 'Junk_F_wait');
                 m.bindCHR0(this.animationController, chr);
+                this.modelBinds.push(
+                    {model: driver, modelToBindTo: m, nodeName: "HandR"}
+                );
             }
             // Peatrice
             else if (type === 5){
-                const rres = getOArcRRES('Junk');
-                const m = spawnModel(rres, 'Junk');
-                const chr = mergeCHR0(rres, 'Junk_wait', 'Junk_F_wait');
+                const rres = getOArcRRES('Azukariya');
+                const m = spawnModel(rres, 'Azukariya');
+                const chr = mergeCHR0(rres, 'Azukariya_wait', 'Azukariya_F_wait');
+                spawnModel(rres, 'Azukariya_chair');
                 m.bindCHR0(this.animationController, chr);
             }
             // Potion Husband w/Baby
@@ -1457,18 +1538,17 @@ class SkywardSwordRenderer implements Viewer.SceneGfx {
         // Place for stone tablets in goddess statue
         else if (name === 'SndStn') {
             const rres = getOArcRRES('LithographyStand');
-            spawnModel(rres, 'LithographyStand');
+            const stand = spawnModel(rres, 'LithographyStand');
             const emerald = spawnModel(rres, 'SekibanMapADemo');
             const ruby = spawnModel(rres, 'SekibanMapBDemo');
             const amber = spawnModel(rres, 'SekibanMapCDemo');
-            emerald.bindCLR0(this.animationController, findCLR0(rres, 'SekibanMapADemo'));
-            ruby.bindCLR0(this.animationController, findCLR0(rres, 'SekibanMapBDemo'));
-            amber.bindCLR0(this.animationController, findCLR0(rres, 'SekibanMapCDemo'));
-            translateModel(emerald, [25.5, 128, 37]);
-            translateModel(ruby, [15, 164, 37]);
-            translateModel(amber, [-27, 139, 37]);
             const crest = spawnOArcModel('GoddessSymbolSc');
-            translateModel(crest, [0,300,0]);
+            const node = this.findNode(stand, 'SetGS')!;
+            mat4.translate(node.modelMatrix, node.modelMatrix, [0, 90, 0]);
+            this.modelBinds.push({model: emerald, modelToBindTo: stand, nodeName: "locator_A"});
+            this.modelBinds.push({model:    ruby, modelToBindTo: stand, nodeName: "locator_B"});
+            this.modelBinds.push({model:   amber, modelToBindTo: stand, nodeName: "locator_C"});
+            this.modelBinds.push({model:   crest, modelToBindTo: stand, nodeName: "SetGS"});
         }
         // Batreaux Human
         else if (name === 'NpcAkuH') {
@@ -1730,9 +1810,11 @@ class SkywardSwordRenderer implements Viewer.SceneGfx {
         }
         // Small Goddess Statues
         else if (name === 'SngGS') {
-            spawnOArcModel('GoddessStatue');
-            const m = spawnOArcModel('GoddessSymbolSc');
-            translateModel(m, [0,-200, 500]);
+            const statue = spawnOArcModel('GoddessStatue');
+            const crest = spawnOArcModel('GoddessSymbolSc');
+            const node = this.findNode(statue, 'SetGS')!;
+            mat4.translate(node.modelMatrix, node.modelMatrix, [0, 90, 0]);
+            this.modelBinds.push({model: crest, modelToBindTo: statue, nodeName: 'SetGS'});
         }
         // Ancient Jwls (Treasure)
         else if (name === 'AncJwls'){
@@ -1817,20 +1899,28 @@ class SkywardSwordRenderer implements Viewer.SceneGfx {
             const rres = getOArcRRES('ForestManOld');
             const m = spawnModel(rres, 'ForestManOld');
             const chr = findCHR0(rres, 'ForestManOld_wait');
+            const leafrres = getOArcRRES('ForestManLeaf');
+            const leaf = spawnModel(leafrres, 'ForestManLeaf');
+            leaf.bindRRESAnimations(this.animationController, leafrres, 'ForestManLeafOld_Close');
+            leaf.bindPAT0(staticFrame(0), findPAT0(leafrres, 'ForestManLeaf'));
+            this.modelBinds.push({model: leaf, modelToBindTo: m, nodeName: "Tail"});
             m.bindCHR0(this.animationController, chr);
         }
         // Machi
         else if (name === 'Npckyu1') {
             const rres = getOArcRRES('ForestMan');
-            const m1 = spawnModel(rres, 'ForestMan');
-            const m2 = spawnModel(rres, 'ForestManEyeA');
-            const m3 = spawnModel(rres, 'ForestManHairA');
+            const body = spawnModel(rres, 'ForestMan');
+            const eyes = spawnModel(rres, 'ForestManEyeA');
+            const hair = spawnModel(rres, 'ForestManHairA');
+            const leafrres = getOArcRRES('ForestManLeaf');
+            const leaf = spawnModel(leafrres, 'ForestManLeaf');
+            leaf.bindRRESAnimations(this.animationController, leafrres, 'ForestManLeaf_Close');
+            leaf.bindPAT0(staticFrame(-1), findPAT0(leafrres, 'ForestManLeaf'));
+            this.modelBinds.push({model: leaf, modelToBindTo: body, nodeName: "Tail"});
             const chr = findCHR0(rres, 'ForestMan_wait');
-            m1.bindCHR0(this.animationController, chr);
-            translateModel(m2, [0,68,0]);
-            translateModel(m3, [0,100,0]);
-            // The nodes arent properly bound
-            console.log('Fix Npckyu1 Anim');
+            body.bindCHR0(this.animationController, chr);
+            this.modelBinds.push({model: eyes, modelToBindTo: body, nodeName: "Head"});
+            this.modelBinds.push({model: hair, modelToBindTo: body, nodeName: "Hair"});
         }
         // Yerbal
         else if (name === 'NpcKyuW') {
@@ -1842,42 +1932,52 @@ class SkywardSwordRenderer implements Viewer.SceneGfx {
         // Oolo
         else if (name === 'NpcOKyu') {
             const rres = getOArcRRES('ForestMan');
-            const m1 = spawnModel(rres, 'ForestMan');
-            const m2 = spawnModel(rres, 'ForestManEyeC');
-            const m3 = spawnModel(rres, 'ForestManHairC');
+            const body = spawnModel(rres, 'ForestMan');
+            const eyes = spawnModel(rres, 'ForestManEyeC');
+            const hair = spawnModel(rres, 'ForestManHairC');
             const chr = findCHR0(rres, 'ForestMan_wait');
-            m1.bindCHR0(this.animationController, chr);
-            translateModel(m2, [0,68,0]);
-            translateModel(m3, [0,100,0]);
-            // The nodes arent properly bound
-            console.log('Fix Npckyu3 Anim');
+            const leafrres = getOArcRRES('ForestManLeaf');
+            const leaf = spawnModel(leafrres, 'ForestManLeaf');
+            leaf.bindRRESAnimations(this.animationController, leafrres, 'ForestManLeaf_Close');
+            leaf.bindPAT0(staticFrame(-1), findPAT0(leafrres, 'ForestManLeaf'));
+            this.modelBinds.push({model: leaf, modelToBindTo: body, nodeName: "Tail"});
+            body.bindCHR0(this.animationController, chr);
+            this.modelBinds.push({model: eyes, modelToBindTo: body, nodeName: "Head"});
+            this.modelBinds.push({model: hair, modelToBindTo: body, nodeName: "Hair"});
         }
         // Lopsa
         else if (name === 'Npckyu3') {
             const rres = getOArcRRES('ForestMan');
-            const m1 = spawnModel(rres, 'ForestMan');
-            const m2 = spawnModel(rres, 'ForestManEyeB');
-            const m3 = spawnModel(rres, 'ForestManHairB');
+            const body = spawnModel(rres, 'ForestMan');
+            const eyes = spawnModel(rres, 'ForestManEyeB');
+            const hair = spawnModel(rres, 'ForestManHairB');
             const chr = findCHR0(rres, 'ForestMan_wait');
-            m1.bindCHR0(this.animationController, chr);
-            translateModel(m2, [0,68,0]);
-            translateModel(m3, [0,100,0]);
-            // The nodes arent properly bound
-            console.log('Fix Npckyu3 Anim');
+            const leafrres = getOArcRRES('ForestManLeaf');
+            const leaf = spawnModel(leafrres, 'ForestManLeaf');
+            leaf.bindRRESAnimations(this.animationController, leafrres, 'ForestManLeaf_Close');
+            leaf.bindPAT0(staticFrame(-1), findPAT0(leafrres, 'ForestManLeaf'));
+            this.modelBinds.push({model: leaf, modelToBindTo: body, nodeName: "Tail"});
+            body.bindCHR0(this.animationController, chr);
+            this.modelBinds.push({model: eyes, modelToBindTo: body, nodeName: "Head"});
+            this.modelBinds.push({model: hair, modelToBindTo: body, nodeName: "Hair"});
         }
         // Erla
         else if (name === 'Npckyu4') {
             const rres = getOArcRRES('ForestMan');
-            const m1 = spawnModel(rres, 'ForestMan');
-            const m2 = spawnModel(rres, 'ForestManEyeD');
+            const body = spawnModel(rres, 'ForestMan');
+            const eyes = spawnModel(rres, 'ForestManEyeD');
             const chr = findCHR0(rres, 'ForestMan_wait');
-            m1.bindCHR0(this.animationController, chr);
-            translateModel(m2, [0,68,0]);
-            // The nodes arent properly bound
-            console.log('Fix Npckyu4 Anim');
+            const leafrres = getOArcRRES('ForestManLeaf');
+            const leaf = spawnModel(leafrres, 'ForestManLeaf');
+            leaf.bindRRESAnimations(this.animationController, leafrres, 'ForestManLeaf_Close');
+            leaf.bindPAT0(staticFrame(-1), findPAT0(leafrres, 'ForestManLeaf'));
+            this.modelBinds.push({model: leaf, modelToBindTo: body, nodeName: "Tail"});
+            body.bindCHR0(this.animationController, chr);
+            this.modelBinds.push({model: eyes, modelToBindTo: body, nodeName: "Head"});
+            // this.modelBinds.push({model: hair, modelToBindTo: body, nodeName: "Hair"});
+            // console.log('Fix Npckyu4 Anim');
             if (this.stageId === 'F103'){
-                translateModel(m1, [0,58,0]);
-                translateModel(m2, [0,58,0]);
+                translateModel(body, [0,58,0]);
             }
         }
         // Eldin Volcano Eruption Smoke
@@ -1956,10 +2056,7 @@ class SkywardSwordRenderer implements Viewer.SceneGfx {
             const chr = mergeCHR0(rres, 'Moguma_wait', 'Moguma_F_wait');
             m.bindCHR0(this.animationController, chr);
             const hair = spawnModel(rres, 'Moguma_hair'+['A','B','C','D','E','F','G'][type]);
-            translateModel(m, [0,-75,0]);
-            hair.mdl0Model.mdl0.nodes[0].modelMatrix = m.mdl0Model.mdl0.nodes.find((node)=> node.name === 'SklRoot')!.modelMatrix;
-            translateModel(hair, [4, -12, 38]);
-            console.info('Revist NpcMonN'); // bind hair
+            this.modelBinds.push({model: hair, modelToBindTo: m, nodeName: 'Head'})
         }
         // Mogmas
         else if (name === 'NpcMoT2') {
@@ -2015,6 +2112,12 @@ class SkywardSwordRenderer implements Viewer.SceneGfx {
             const m2 = spawnModel(rres, 'TerryBicycle');
             // m2.bindCHR0(this.animationController, findCHR0(rres, 'TerryBicycle_cycle'));
         }
+        // Goddess Statue
+        else if (name === "IslMegm") {
+            const rres = getOArcRRES(['F000Megami', 'F000LastDungeon'][params1 & 0x3]);
+            const m = spawnModel(rres, ['F000Megami', 'F000LastDungeon'][params1 & 0x3]);
+            const m2 = spawnModel(rres, ['F000Megami_s', 'F000LastDungeon_s'][params1 & 0x3]);
+        }
         // Mushrooms
         else if (name === 'KinokoA') { spawnOArcModel('MushroomA'); }
         else if (name === 'KinokoB') { spawnOArcModel('MushroomB'); }
@@ -2065,6 +2168,8 @@ class SkywardSwordRenderer implements Viewer.SceneGfx {
         }
     }
 
+    // TODO(Zeldex) : Move the matrix (scaling, rotation, translation) operations to spawn object
+    //              Reason: The game sometimes opts to ignore them and will reuse the fields for parameters
     private spawnLayout(device: GfxDevice, layout: RoomLayout): void {
         const q = quat.create();
 
@@ -2105,7 +2210,7 @@ class SkywardSwordRenderer implements Viewer.SceneGfx {
             let scaleZ = obj.sz;
             let rotationX = 180 * (obj.rotX / 0x7FFF);
             let rotationZ = 0;
-            const rotationY = 180 * (obj.rotY / 0x7FFF);
+            let rotationY = 180 * (obj.rotY / 0x7FFF);
             if (!['BlsRock', ].includes(obj.name)){
                 rotationX = 0;
             }
@@ -2130,6 +2235,16 @@ class SkywardSwordRenderer implements Viewer.SceneGfx {
                     scaleZ = 0.8;
                 }
                 rotationZ = 180;
+            }
+
+            
+            if (obj.name === "Bamboo")
+            {
+                scaleZ = scaleZ * 100.0 * 0.186915;
+                scaleX = scaleZ;
+                scaleY = scaleZ;
+                rotationZ = 0;
+                rotationY = 0;
             }
             quat.fromEuler(q, rotationX, rotationY, rotationZ);
 
@@ -2208,8 +2323,13 @@ class SkywardSwordRenderer implements Viewer.SceneGfx {
         const layoutsChunk = assertExists(roomChunkTable.find((chunk) => chunk.name === 'LAY '));
 
         // Parse layouts table.
-
+        let areaType = 0;
         function parseObjects(chunkTable: Chunk[]): RoomLayout {
+            // Look for STIF
+            const stifChunk = chunkTable.find((chunk) => chunk.name === 'STIF');
+            if (stifChunk)
+                areaType = view.getInt8(stifChunk.offs + 0xe);
+            
             // Look for objects table.
             const obj: Obj[] = [];
             const objChunk = chunkTable.find((chunk) => chunk.name === 'OBJ ');
@@ -2264,7 +2384,7 @@ class SkywardSwordRenderer implements Viewer.SceneGfx {
             const layout = parseLayout(i);
             layouts.push({obj: obj.concat(layout.obj),sobj: sobj.concat(layout.sobj)});
         }
-        return { layouts };
+        return { layouts, areaType };
     }
 
 }
@@ -2336,7 +2456,7 @@ const sceneDescs = [
     new SkywardSwordSceneDesc("F101", "Deep Woods", [0,1,2,3,4,5]),
     new SkywardSwordSceneDesc("D100", "Skyview Temple", [0,1,2,3,4]),
     new SkywardSwordSceneDesc("B100", "Skyview Temple (Boss)", [1,2,3,4,5,13]),
-    new SkywardSwordSceneDesc("B100_1", "Skyview Spring", [3,4,13,14]),
+    new SkywardSwordSceneDesc("B100_1", "Skyview Spring", [0,3,4,13,14]),
     new SkywardSwordSceneDesc("F102", "Lake Floria", [0,1]),
     new SkywardSwordSceneDesc("F102_1", "Outside Ancient Cistern", [0,1,3]),
     new SkywardSwordSceneDesc("F102_2", "Faron's Lair", [0,1,3,4]),

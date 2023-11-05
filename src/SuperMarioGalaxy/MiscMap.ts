@@ -331,10 +331,10 @@ export class WaterCameraFilter extends LiveActor<WaterCameraFilterNrv> {
             return;
 
         // Captured already.
-        const device = sceneObjHolder.modelCache.device, cache = sceneObjHolder.modelCache.cache;
+        const cache = sceneObjHolder.modelCache.cache;
         const ddraw = this.ddraw;
 
-        ddraw.beginDraw();
+        ddraw.beginDraw(cache);
 
         const flipY = gfxDeviceNeedsFlipY(sceneObjHolder.modelCache.device);
 
@@ -360,7 +360,7 @@ export class WaterCameraFilter extends LiveActor<WaterCameraFilterNrv> {
         ddraw.texCoord2f32(GX.Attr.TEX1, 1.0, flipY ? 1.0 : 0.0);
         ddraw.end();
 
-        const renderInst = ddraw.endDraw(renderInstManager);
+        const renderInst = ddraw.endDrawAndMakeRenderInst(renderInstManager);
 
         const materialParams = this.materialParams;
         computeRotationZAroundPoint(materialParams.u_TexMtx[0], this.angle * MathConstants.DEG_TO_RAD, 0.5, 0.5);
@@ -368,7 +368,7 @@ export class WaterCameraFilter extends LiveActor<WaterCameraFilterNrv> {
         this.color.a = this.fade / 255.0;
         colorCopy(materialParams.u_Color[ColorKind.C0], this.color);
 
-        this.materialHelper.setOnRenderInst(device, cache, renderInst);
+        this.materialHelper.setOnRenderInst(cache, renderInst);
         renderInst.setUniformBufferOffset(GX_Program.ub_SceneParams, sceneObjHolder.renderParams.sceneParamsOffs2D, ub_SceneParamsBufferSize);
         this.materialHelper.allocateMaterialParamsDataOnInst(renderInst, this.materialParams);
         renderInst.setSamplerBindingsFromTextureMappings(this.materialParams.m_TextureMapping);

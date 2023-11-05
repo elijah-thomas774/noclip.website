@@ -11,7 +11,7 @@ import { mat4SetRow, mat4FromRowMajor, mat4SetValue, mat4SetRowMajor, mat4SetTra
 import { mat4, vec3 } from 'gl-matrix';
 import { FurFactory } from './fur';
 import { SFAAnimationController } from './animation';
-import { colorFromRGBA, Color, colorCopy, White, OpaqueBlack, colorNewCopy, TransparentBlack } from '../Color';
+import { colorFromRGBA, Color, colorCopy, White, OpaqueBlack, colorNewCopy, TransparentBlack, Red, Blue } from '../Color';
 import { SceneRenderContext } from './render';
 import { ColorFunc, getGXIndTexMtxID, getGXIndTexMtxID_S, getGXIndTexMtxID_T, getGXKonstAlphaSel, getGXKonstColorSel, getGXPostTexGenMatrix, IndTexStage, SFAMaterialBuilder, TevStage, TexCoord, TexFunc, TexMap } from './MaterialBuilder';
 import { clamp } from '../MathHelpers';
@@ -794,7 +794,7 @@ export class StandardMapMaterial extends StandardMaterial {
 
         this.mb.setTexMtx(2, (dst: mat4, matCtx: MaterialRenderContext) => {
             // Flipped
-            texProjCameraSceneTex(dst, matCtx.sceneCtx.viewerInput.camera, 1);
+            texProjCameraSceneTex(dst, matCtx.sceneCtx.viewerInput.camera, -matCtx.sceneCtx.flipYScale);
             mat4.mul(dst, dst, matCtx.modelToViewMtx);
             return dst;
         });
@@ -842,7 +842,7 @@ export class StandardMapMaterial extends StandardMaterial {
             this.mb.setChanCtrl(GX.ColorChannelID.COLOR0, true, GX.ColorSrc.REG, GX.ColorSrc.VTX, 0, GX.DiffuseFunction.NONE, GX.AttenuationFunction.NONE);
         }
 
-        this.mb.setChanCtrl(GX.ColorChannelID.COLOR1A1, false, GX.ColorSrc.REG, GX.ColorSrc.VTX, 0, GX.DiffuseFunction.NONE, GX.AttenuationFunction.NONE);
+        this.mb.setChanCtrl(GX.ColorChannelID.COLOR1A1, false, GX.ColorSrc.REG, GX.ColorSrc.REG, 0, GX.DiffuseFunction.NONE, GX.AttenuationFunction.NONE);
     }
 }
 
@@ -852,6 +852,10 @@ class StandardObjectMaterial extends StandardMaterial {
     private ambProbeTexCoord?: TexCoord = undefined;
     private enableHemisphericProbe = false;
     private enableReflectiveProbe = false;
+
+    constructor(cache: GfxRenderCache, factory: MaterialFactory, shader: Shader, texFetcher: TextureFetcher, private hasSkeleton: boolean) {
+        super(cache, factory, shader, texFetcher);
+    }
 
     // Perturbed normals, e.g. the Arwing
     private addNBTTextureStage(): number { // Returns scale to use for nbtTexCoord
@@ -889,10 +893,10 @@ class StandardObjectMaterial extends StandardMaterial {
         });
         // Matrix comes from TEX0MTXIDX
         const binrmTexCoord = this.mb.genTexCoord(GX.TexGenType.MTX2x4, GX.TexGenSrc.BINRM, GX.TexGenMatrix.TEXMTX0, false, getGXPostTexGenMatrix(pttexmtx));
-        this.mb.setTexCoordUsesMtxIdx(binrmTexCoord);
+        this.mb.setTexCoordUsesMtxIdx(binrmTexCoord, this.hasSkeleton);
         // Matrix comes from TEX1MTXIDX
         const tanTexCoord = this.mb.genTexCoord(GX.TexGenType.MTX2x4, GX.TexGenSrc.TANGENT, GX.TexGenMatrix.TEXMTX0, false, getGXPostTexGenMatrix(pttexmtx));
-        this.mb.setTexCoordUsesMtxIdx(tanTexCoord);
+        this.mb.setTexCoordUsesMtxIdx(tanTexCoord, this.hasSkeleton);
 
         const stage0 = this.mb.genTevStage();
         this.mb.setTevIndirect(stage0, indStage, GX.IndTexFormat._8, GX.IndTexBiasSel.ST, getGXIndTexMtxID_S(indTexMtx), GX.IndTexWrap._0, GX.IndTexWrap._0, false, false, GX.IndTexAlphaSel.OFF);
@@ -914,14 +918,13 @@ class StandardObjectMaterial extends StandardMaterial {
 
     private getAmbientProbeTexCoord(): TexCoord {
         if (this.ambProbeTexCoord === undefined) {
-            const ptmtx = this.mb.genPostTexMtx((dst: mat4) => {
+            const ptmtx = this.mb.genPostTexMtx((dst: mat4, ctx: MaterialRenderContext) => {
                 mat4.fromTranslation(dst, [0.5, 0.5, 1.0]);
-                const flipY = -1; // XXX: the flipY situation is confusing. Is this the solution or can it be handled elsewhere?
-                mat4.scale(dst, dst, [-0.5, -0.5 * flipY, 0.0]);
+                mat4.scale(dst, dst, [-0.5, -0.5 * ctx.sceneCtx.flipYScale, 0.0]);
             });
             // Matrix comes from TEX0MTXIDX (or TEX2MTXIDX if NBT textures are used)
             this.ambProbeTexCoord = this.mb.genTexCoord(GX.TexGenType.MTX2x4, GX.TexGenSrc.NRM, GX.TexGenMatrix.TEXMTX0, false, getGXPostTexGenMatrix(ptmtx));
-            this.mb.setTexCoordUsesMtxIdx(this.ambProbeTexCoord);
+            this.mb.setTexCoordUsesMtxIdx(this.ambProbeTexCoord, this.hasSkeleton);
         }
 
         return this.ambProbeTexCoord;
@@ -1200,6 +1203,24 @@ class StandardObjectMaterial extends StandardMaterial {
         }
     }
 
+    private addRedOrBlueStage(condition: boolean) {
+        // XXX: for testing: Display red if a condition is true, otherwise display blue.
+        const fooFlag = !!(this.shader.lightFlags & LightFlags.OverrideLighting) && !(this.shader.normalFlags & NormalFlags.HasVertexColor);
+        // Pre-probe layers
+        this.setupShaderLayers(true, fooFlag); // Just put this here to get layer 0 setup
+        const stage = this.mb.genTevStage();
+        const color = condition ? Red : Blue;
+        const kc = this.mb.genKonstColor((dst: Color) => {
+            colorCopy(dst, color);
+        });
+        this.mb.setTevDirect(stage);
+        this.mb.setTevKColorSel(stage, getGXKonstColorSel(kc));
+        this.mb.setTevKAlphaSel(stage, getGXKonstAlphaSel(kc));
+        this.mb.setTevOrder(stage, null, null, GX.RasColorChannelID.COLOR0A0);
+        this.mb.setTevColorFormula(stage, GX.CC.ZERO, GX.CC.ZERO, GX.CC.ZERO, GX.CC.KONST);
+        this.mb.setTevAlphaFormula(stage, GX.CA.ZERO, GX.CA.ZERO, GX.CA.ZERO, GX.CA.APREV);
+    }
+
     protected rebuildSpecialized() {
         this.cprevIsValid = false;
         this.aprevIsValid = false;
@@ -1207,7 +1228,7 @@ class StandardObjectMaterial extends StandardMaterial {
         this.enableHemisphericProbe = this.shader.hasHemisphericProbe;
         this.enableReflectiveProbe = this.shader.hasReflectiveProbe;
 
-        this.mb.setUsePnMtxIdx(true);
+        this.mb.setUsePnMtxIdx(this.hasSkeleton);
 
         let nbtScale = 0;
         if ((this.enableHemisphericProbe || this.enableReflectiveProbe) && this.shader.hasNBTTexture)
@@ -1239,8 +1260,32 @@ class StandardObjectMaterial extends StandardMaterial {
         }
 
         if (false) {
+            // XXX: for testing: display red if shape has skeleton
+            this.addRedOrBlueStage(this.hasSkeleton);
+        } else if (false) {
+            // XXX: for testing: display red if shader asks for vertex colors while the shape doesn't have any.
+            const wantsVertexColors = !!(this.shader.normalFlags & NormalFlags.HasVertexColor) || !!(this.shader.normalFlags & NormalFlags.HasVertexAlpha);
+            const hasVertexColors = !!(this.shader.attrFlags & ShaderAttrFlags.CLR);
+            this.addRedOrBlueStage(wantsVertexColors && !hasVertexColors);
+        } else if (false) {
+            // XXX: for testing: display red if shape has vertex colors
+            this.addRedOrBlueStage(!!(this.shader.attrFlags & ShaderAttrFlags.CLR));
+        } else if (false) {
+            // XXX: for testing: display red if shape has normals
+            this.addRedOrBlueStage(!!(this.shader.attrFlags & ShaderAttrFlags.NRM));
+        } else if (false) {
+            // XXX: for testing: show only COLOR0
+            const fooFlag = !!(this.shader.lightFlags & LightFlags.OverrideLighting) && !(this.shader.normalFlags & NormalFlags.HasVertexColor);
+            // Pre-probe layers
+            this.setupShaderLayers(true, fooFlag); // Just put this here to get layer 0 setup
+            const stage = this.mb.genTevStage();
+            this.mb.setTevDirect(stage);
+            this.mb.setTevOrder(stage, null, null, GX.RasColorChannelID.COLOR0A0);
+            this.mb.setTevColorFormula(stage, GX.CC.ZERO, GX.CC.ZERO, GX.CC.ZERO, GX.CC.RASC);
+            this.mb.setTevAlphaFormula(stage, GX.CA.ZERO, GX.CA.ZERO, GX.CA.ZERO, GX.CA.APREV);
+        } else if (false) {
             // XXX: for testing: show only hemispheric ambient lighting
-            const fooFlag = !!((this.shader.lightFlags & LightFlags.OverrideLighting) && !(this.shader.normalFlags & NormalFlags.HasVertexColor));
+            const fooFlag = !!(this.shader.lightFlags & LightFlags.OverrideLighting) && !(this.shader.normalFlags & NormalFlags.HasVertexColor);
             // Pre-probe layers
             this.setupShaderLayers(true, fooFlag); // Just put this here to get layer 0 setup
             const stage = this.mb.genTevStage();
@@ -1249,7 +1294,7 @@ class StandardObjectMaterial extends StandardMaterial {
             this.mb.setTevColorFormula(stage, GX.CC.ZERO, GX.CC.ZERO, GX.CC.ZERO, GX.CC.C1);
             this.mb.setTevAlphaFormula(stage, GX.CA.ZERO, GX.CA.ZERO, GX.CA.ZERO, GX.CA.APREV);
         } else {
-            const fooFlag = !!((this.shader.lightFlags & LightFlags.OverrideLighting) && !(this.shader.normalFlags & NormalFlags.HasVertexColor));
+            const fooFlag = !!(this.shader.lightFlags & LightFlags.OverrideLighting) && !(this.shader.normalFlags & NormalFlags.HasVertexColor);
 
             // Pre-probe layers
             this.setupShaderLayers(true, fooFlag);
@@ -1327,7 +1372,6 @@ class StandardObjectMaterial extends StandardMaterial {
                 0xff,
                 GX.DiffuseFunction.CLAMP,
                 GX.AttenuationFunction.SPOT);
-            // TODO: utilize channel 1
             this.mb.setChanCtrl(GX.ColorChannelID.COLOR1A1, false, GX.ColorSrc.REG, GX.ColorSrc.REG, 0, GX.DiffuseFunction.NONE, GX.AttenuationFunction.NONE);
         }
     }
@@ -1337,13 +1381,13 @@ class WaterMaterial extends MaterialBase {
     protected rebuildInternal() {
         this.mb.setTexMtx(0, (dst: mat4, ctx: MaterialRenderContext) => {
             // Flipped
-            texProjCameraSceneTex(dst, ctx.sceneCtx.viewerInput.camera, 1);
+            texProjCameraSceneTex(dst, ctx.sceneCtx.viewerInput.camera, -ctx.sceneCtx.flipYScale);
             mat4.mul(dst, dst, ctx.modelToViewMtx);
         });
 
         this.mb.setTexMtx(1, (dst: mat4, ctx: MaterialRenderContext) => {
             // Unflipped
-            texProjCameraSceneTex(dst, ctx.sceneCtx.viewerInput.camera, -1);
+            texProjCameraSceneTex(dst, ctx.sceneCtx.viewerInput.camera, ctx.sceneCtx.flipYScale);
             mat4.mul(dst, dst, ctx.modelToViewMtx);
         });
 
@@ -1549,7 +1593,7 @@ class FurMaterial extends MaterialBase {
         if (this.isMapBlock)
             this.mb.setChanCtrl(GX.ColorChannelID.ALPHA0, false, GX.ColorSrc.REG, GX.ColorSrc.VTX, 0, GX.DiffuseFunction.NONE, GX.AttenuationFunction.NONE);
 
-        this.mb.setChanCtrl(GX.ColorChannelID.COLOR1A1, false, GX.ColorSrc.REG, GX.ColorSrc.VTX, 0, GX.DiffuseFunction.NONE, GX.AttenuationFunction.NONE);
+        this.mb.setChanCtrl(GX.ColorChannelID.COLOR1A1, false, GX.ColorSrc.REG, GX.ColorSrc.REG, 0, GX.DiffuseFunction.NONE, GX.AttenuationFunction.NONE);
 
         this.mb.setCullMode(GX.CullMode.BACK);
         this.mb.setZMode(true, GX.CompareType.LEQUAL, false);
@@ -1788,8 +1832,8 @@ export class MaterialFactory {
         return this.scrollSlots.length - 1;
     }
 
-    public buildObjectMaterial(shader: Shader, texFetcher: TextureFetcher): SFAMaterial {
-        return new StandardObjectMaterial(this.cache, this, shader, texFetcher);
+    public buildObjectMaterial(shader: Shader, texFetcher: TextureFetcher, hasSkeleton: boolean): SFAMaterial {
+        return new StandardObjectMaterial(this.cache, this, shader, texFetcher, hasSkeleton);
     }
 
     public buildMapMaterial(shader: Shader, texFetcher: TextureFetcher): SFAMaterial {

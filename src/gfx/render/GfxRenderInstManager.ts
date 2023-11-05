@@ -255,6 +255,8 @@ export class GfxRenderInst {
             for (let j = 0; j < bd.bindingLayout.numUniformBuffers; j++)
                 assert(bd.uniformBufferBindings[j].wordCount > 0);
         }
+
+        assert(this._drawCount > 0);
     }
 
     /**
@@ -777,7 +779,7 @@ export class GfxRenderInstManager {
     /**
      * {@deprecated}
      */
-    public setVisibleByFilterKeyExact(filterKey: number): void {
+    public setVisibleByFilterKeyExact(filterKey: number): GfxRenderInstList {
         const list = assertExists(this.simpleRenderInstList);
         // Guess whether we should speed things up with a post-sort by the previous contents of the list...
         list.checkUsePostSort();
@@ -786,22 +788,8 @@ export class GfxRenderInstManager {
         for (let i = 0; i < this.instPool.allocCount; i++)
             if (!!(this.instPool.pool[i]._flags & GfxRenderInstFlags.Draw) && this.instPool.pool[i].filterKey === filterKey)
                 list.submitRenderInst(this.instPool.pool[i]);
-    }
 
-    /**
-     * {@deprecated}
-     */
-    public hasAnyVisible(): boolean {
-        const list = assertExists(this.simpleRenderInstList);
-        return list.renderInsts.length > 0;
-    }
-
-    /**
-     * {@deprecated}
-     */
-    public setVisibleNone(): void {
-        const list = assertExists(this.simpleRenderInstList);
-        list.renderInsts.length = 0;
+        return list;
     }
 
     public drawOnPassRenderer(passRenderer: GfxRenderPass): void {
@@ -824,6 +812,6 @@ export function executeOnPass(renderInstManager: GfxRenderInstManager, passRende
  */
 export function hasAnyVisible(renderInstManager: GfxRenderInstManager, passMask: number): boolean {
     renderInstManager.setVisibleByFilterKeyExact(passMask);
-    return renderInstManager.hasAnyVisible();
+    return renderInstManager.simpleRenderInstList!.renderInsts.length > 0;
 }
 //#endregion

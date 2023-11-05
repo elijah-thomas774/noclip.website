@@ -49,6 +49,10 @@ void main() {
     gl_Position.xy = p * vec2(2) - vec2(1);
     gl_Position.zw = vec2(${reverseDepthForDepthOffset(1)}, 1);
     v_TexCoord = p * u_ScaleOffset.xy + u_ScaleOffset.zw;
+
+#if defined GFX_CLIPSPACE_NEAR_ZERO
+    gl_Position.z = (gl_Position.z + gl_Position.w) * 0.5;
+#endif
 }
 `;
 
@@ -248,7 +252,7 @@ export class GallerySceneRenderer implements SceneGfx {
         this.circle.prepareToRender(this.renderHelper.renderInstManager, viewerInput);
 
         for (let i = 0; i < this.objectRenderers.length; i++)
-            this.objectRenderers[i].prepareToRender(this.renderHelper.renderInstManager, viewerInput, katamariWorldSpaceToNoclipSpace, 0);
+            this.objectRenderers[i].prepareToRender(this.renderHelper.renderInstManager, viewerInput, katamariWorldSpaceToNoclipSpace, 1);
 
         this.renderHelper.renderInstManager.popTemplateRenderInst();
         this.renderHelper.prepareToRender();

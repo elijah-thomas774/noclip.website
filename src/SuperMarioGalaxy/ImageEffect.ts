@@ -7,7 +7,6 @@ import { AreaObj, AreaObjMgr, AreaFormType } from "./AreaObj";
 import { JMapInfoIter, getJMapInfoArg7, getJMapInfoArg0, getJMapInfoArg1, getJMapInfoArg2, getJMapInfoArg3 } from "./JMapInfo";
 import { ZoneAndLayer } from "./LiveActor";
 import { fallback } from "../util";
-import { ViewerRenderInput } from "../viewer";
 import { connectToScene, getAreaObj } from "./ActorUtil";
 import { DeviceProgram } from "../Program";
 import { TextureMapping } from "../TextureHolder";
@@ -321,7 +320,6 @@ export class BloomEffect extends ImageEffectBase {
         builder.pushPass((pass) => {
             pass.setDebugName('Bloom Downsample 1/4');
             pass.attachRenderTargetID(GfxrAttachmentSlot.Color0, downsample4ColorTargetID);
-            pass.pushDebugThumbnail(GfxrAttachmentSlot.Color0);
 
             const resolveTextureID = builder.resolveRenderTarget(downsample2ColorTargetID);
             pass.attachResolveTexture(resolveTextureID);
@@ -334,12 +332,12 @@ export class BloomEffect extends ImageEffectBase {
                 renderInst.drawOnPass(renderInstManager.gfxRenderCache, passRenderer);
             });
         });
+        builder.pushDebugThumbnail(downsample4ColorTargetID);
 
         // Blur L1.
         builder.pushPass((pass) => {
             pass.setDebugName('Bloom Blur L1');
             pass.attachRenderTargetID(GfxrAttachmentSlot.Color0, blurL1ColorTargetID);
-            pass.pushDebugThumbnail(GfxrAttachmentSlot.Color0);
 
             const resolveTextureID = builder.resolveRenderTarget(downsample4ColorTargetID);
             pass.attachResolveTexture(resolveTextureID);
@@ -352,11 +350,11 @@ export class BloomEffect extends ImageEffectBase {
                 renderInst.drawOnPass(renderInstManager.gfxRenderCache, passRenderer);
             });
         });
+        builder.pushDebugThumbnail(blurL1ColorTargetID);
 
         builder.pushPass((pass) => {
             pass.setDebugName('Bloom Blur Downsample 1/8');
             pass.attachRenderTargetID(GfxrAttachmentSlot.Color0, downsample8ColorTargetID);
-            pass.pushDebugThumbnail(GfxrAttachmentSlot.Color0);
 
             const resolveTextureID = builder.resolveRenderTarget(blurL1ColorTargetID);
             pass.attachResolveTexture(resolveTextureID);
@@ -369,11 +367,11 @@ export class BloomEffect extends ImageEffectBase {
                 renderInst.drawOnPass(renderInstManager.gfxRenderCache, passRenderer);
             });
         });
+        builder.pushDebugThumbnail(downsample8ColorTargetID);
 
         builder.pushPass((pass) => {
             pass.setDebugName('Bloom Blur L2 (Bokeh)');
             pass.attachRenderTargetID(GfxrAttachmentSlot.Color0, blurL2ColorTargetID);
-            pass.pushDebugThumbnail(GfxrAttachmentSlot.Color0);
 
             const resolveTextureID = builder.resolveRenderTarget(downsample8ColorTargetID);
             pass.attachResolveTexture(resolveTextureID);
@@ -386,6 +384,7 @@ export class BloomEffect extends ImageEffectBase {
                 renderInst.drawOnPass(renderInstManager.gfxRenderCache, passRenderer);
             });
         });
+        builder.pushDebugThumbnail(blurL2ColorTargetID);
 
         builder.pushPass((pass) => {
             pass.setDebugName('Bloom Combine');
@@ -576,7 +575,7 @@ export class BloomEffectSimple extends ImageEffectBase {
 class DepthOfFieldProgram extends DeviceProgram {
     public static Common = `
 uniform sampler2D u_TextureColor;
-uniform sampler2D u_TextureDepth;
+uniform sampler2D u_TextureFramebufferDepth;
 
 layout(std140) uniform ub_Params {
     vec4 u_Misc[1];
@@ -602,7 +601,7 @@ in vec2 v_TexCoord;
 ${generateBlurFunction(`Blur`, 4, `u_Intensity * 0.005`, glslGenerateFloat(1/4))}
 
 void main() {
-    float t_DepthSample = texture(SAMPLER_2D(u_TextureDepth), v_TexCoord).r;
+    float t_DepthSample = texture(SAMPLER_2D(u_TextureFramebufferDepth), v_TexCoord).r;
     if (u_IsDepthReversed != 0.0)
         t_DepthSample = 1.0 - t_DepthSample;
 
@@ -726,7 +725,6 @@ export class DepthOfFieldBlur extends ImageEffectBase {
         // Combine.
         builder.pushPass((pass) => {
             pass.setDebugName('Depth of Field Combine');
-            pass.pushDebugThumbnail(GfxrAttachmentSlot.Color0);
             pass.attachRenderTargetID(GfxrAttachmentSlot.Color0, resultBlendTargetID);
 
             const downsampleResolveTextureID = builder.resolveRenderTarget(downsampleColorTargetID);
@@ -743,6 +741,7 @@ export class DepthOfFieldBlur extends ImageEffectBase {
                 renderInst.drawOnPass(renderInstManager.gfxRenderCache, passRenderer);
             });
         });
+        builder.pushDebugThumbnail(resultBlendTargetID);
     }
 }
 

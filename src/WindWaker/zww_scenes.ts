@@ -210,7 +210,7 @@ class dDlst_alphaModel_c {
 
         this.orthoQuad.setVtxDesc(GX.Attr.POS, true);
 
-        this.orthoQuad.beginDraw();
+        this.orthoQuad.beginDraw(cache);
         this.orthoQuad.begin(GX.Command.DRAW_QUADS, 4);
         this.orthoQuad.position3f32(0, 0, 0);
         this.orthoQuad.position3f32(1, 0, 0);
@@ -250,11 +250,11 @@ class dDlst_alphaModel_c {
                 this.materialHelperBackRevZ.allocateMaterialParamsDataOnInst(template, materialParams);
 
                 const back = renderInstManager.newRenderInst();
-                this.materialHelperBackRevZ.setOnRenderInst(device, cache, back);
+                this.materialHelperBackRevZ.setOnRenderInst(cache, back);
                 renderInstManager.submitRenderInst(back);
 
                 const front = renderInstManager.newRenderInst();
-                this.materialHelperFrontZ.setOnRenderInst(device, cache, front);
+                this.materialHelperFrontZ.setOnRenderInst(cache, front);
                 renderInstManager.submitRenderInst(front);
             }
 
@@ -265,7 +265,7 @@ class dDlst_alphaModel_c {
         const renderInst = renderInstManager.newRenderInst();
         const sceneParamsOffs = renderInst.allocateUniformBuffer(GX_Program.ub_SceneParams, ub_SceneParamsBufferSize);
         fillSceneParamsData(renderInst.mapUniformBufferF32(GX_Program.ub_SceneParams), sceneParamsOffs, this.orthoSceneParams);
-        this.materialHelperDrawAlpha.setOnRenderInst(device, cache, renderInst);
+        this.materialHelperDrawAlpha.setOnRenderInst(cache, renderInst);
         colorCopy(materialParams.u_Color[ColorKind.MAT0], this.color);
         this.materialHelperDrawAlpha.allocateMaterialParamsDataOnInst(renderInst, materialParams);
         this.orthoQuad.setOnRenderInst(renderInst);

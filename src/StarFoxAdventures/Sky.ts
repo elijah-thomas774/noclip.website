@@ -1,5 +1,5 @@
 import { mat4, vec3 } from 'gl-matrix';
-import { GfxDevice } from '../gfx/platform/GfxPlatform';
+import { GfxClipSpaceNearZ, GfxDevice } from '../gfx/platform/GfxPlatform';
 import { GfxRenderInstManager } from "../gfx/render/GfxRenderInstManager";
 import { GfxrAttachmentSlot, GfxrGraphBuilder, GfxrRenderTargetDescription, GfxrRenderTargetID } from '../gfx/render/GfxRenderGraph';
 import { TDDraw } from "../SuperMarioGalaxy/DDraw";
@@ -14,6 +14,7 @@ import { SceneRenderContext, SFARenderLists, setGXMaterialOnRenderInst } from '.
 import { vecPitch } from './util';
 import { getCamPos } from './util';
 import { World } from './world';
+import { projectionMatrixConvertClipSpaceNearZ } from '../gfx/helpers/ProjectionHelpers';
 
 const materialParams = new MaterialParams();
 const drawParams = new DrawParams();
@@ -55,6 +56,7 @@ export class Sky {
 
         // Setup to draw in clip space
         fillSceneParams(scratchSceneParams, mat4.create(), sceneCtx.viewerInput.backbufferWidth, sceneCtx.viewerInput.backbufferHeight);
+        projectionMatrixConvertClipSpaceNearZ(scratchSceneParams.u_Projection, device.queryVendorInfo().clipSpaceNearZ, GfxClipSpaceNearZ.NegativeOne);
         let offs = template.getUniformBufferOffset(GX_Material.GX_Program.ub_SceneParams);
         const d = template.mapUniformBufferF32(GX_Material.GX_Program.ub_SceneParams);
         fillSceneParamsData(d, offs, scratchSceneParams);
@@ -81,7 +83,7 @@ export class Sky {
         const t0 = (pitchFactor + fovRollFactor) / tex.height;
         const t1 = t0 - (fovRollFactor * 2.0) / tex.height;
 
-        this.skyddraw.beginDraw();
+        this.skyddraw.beginDraw(renderInstManager.gfxRenderCache);
         this.skyddraw.begin(GX.Command.DRAW_QUADS);
         this.skyddraw.position3f32(-1, -1, -1);
         this.skyddraw.texCoord2f32(GX.Attr.TEX0, 1.0, t0);
@@ -93,12 +95,10 @@ export class Sky {
         this.skyddraw.texCoord2f32(GX.Attr.TEX0, 1.0, t0);
         this.skyddraw.end();
 
-        const renderInst = this.skyddraw.makeRenderInst(renderInstManager);
+        const renderInst = this.skyddraw.endDrawAndMakeRenderInst(renderInstManager);
 
         drawParams.clear();
-        setGXMaterialOnRenderInst(device, renderInstManager, renderInst, this.materialHelperSky, materialParams, drawParams);
-
-        this.skyddraw.endAndUpload(renderInstManager);
+        setGXMaterialOnRenderInst(renderInstManager, renderInst, this.materialHelperSky, materialParams, drawParams);
 
         renderInstManager.popTemplateRenderInst();
         

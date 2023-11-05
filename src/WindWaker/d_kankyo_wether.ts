@@ -162,8 +162,8 @@ export function loadRawTexture(globals: dGlobals, data: ArrayBufferSlice, width:
 const materialParams = new MaterialParams();
 const drawParams = new DrawParams();
 
-function submitScratchRenderInst(device: GfxDevice, renderInstManager: GfxRenderInstManager, materialHelper: GXMaterialHelperGfx, renderInst: GfxRenderInst, viewerInput: ViewerRenderInput, materialParams_ = materialParams, drawParams_ = drawParams): void {
-    materialHelper.setOnRenderInst(device, renderInstManager.gfxRenderCache, renderInst);
+function submitScratchRenderInst(renderInstManager: GfxRenderInstManager, materialHelper: GXMaterialHelperGfx, renderInst: GfxRenderInst, viewerInput: ViewerRenderInput, materialParams_ = materialParams, drawParams_ = drawParams): void {
+    materialHelper.setOnRenderInst(renderInstManager.gfxRenderCache, renderInst);
     renderInst.setSamplerBindingsFromTextureMappings(materialParams_.m_TextureMapping);
     materialHelper.allocateMaterialParamsDataOnInst(renderInst, materialParams_);
     mat4.copy(drawParams_.u_PosMtx[0], viewerInput.camera.viewMatrix);
@@ -298,8 +298,6 @@ export class dKankyo_sun_Packet {
     }
 
     private drawSunMoon(globals: dGlobals, ddraw: TDDraw, renderInstManager: GfxRenderInstManager, viewerInput: ViewerRenderInput): void {
-        const device = globals.modelCache.device;
-
         const envLight = globals.g_env_light;
 
         let drawSun = this.sunAlpha > 0.0;
@@ -373,7 +371,7 @@ export class dKankyo_sun_Packet {
                 }
 
                 const renderInst = ddraw.makeRenderInst(renderInstManager);
-                submitScratchRenderInst(device, renderInstManager, this.materialHelperSunMoon, renderInst, viewerInput);
+                submitScratchRenderInst(renderInstManager, this.materialHelperSunMoon, renderInst, viewerInput);
             }
         }
 
@@ -406,7 +404,7 @@ export class dKankyo_sun_Packet {
                 this.drawSquare(ddraw, scratchMatrix, sunPos, sunSize, 1.0, 1.0);
                 const renderInst = ddraw.makeRenderInst(renderInstManager);
 
-                submitScratchRenderInst(device, renderInstManager, this.materialHelperSunMoon, renderInst, viewerInput);
+                submitScratchRenderInst(renderInstManager, this.materialHelperSunMoon, renderInst, viewerInput);
             }
         }
     }
@@ -430,8 +428,7 @@ export class dKankyo_sun_Packet {
         if (this.visibility <= 0.1)
             return;
 
-        const device = globals.modelCache.device;
-        const envLight = globals.g_env_light;
+       const envLight = globals.g_env_light;
 
         computeMatrixWithoutTranslation(scratchMatrix, viewerInput.camera.worldMatrix);
 
@@ -498,7 +495,7 @@ export class dKankyo_sun_Packet {
         colorCopy(materialParams.u_Color[ColorKind.C0], this.lensflareColor, lensflareAlpha);
 
         const renderInst = ddraw.makeRenderInst(renderInstManager);
-        submitScratchRenderInst(device, renderInstManager, this.materialHelperLenzflareSolid, renderInst, viewerInput);
+        submitScratchRenderInst(renderInstManager, this.materialHelperLenzflareSolid, renderInst, viewerInput);
 
         mat4.rotateZ(scratchMatrix, scratchMatrix, this.lenzflareAngle);
 
@@ -545,18 +542,16 @@ export class dKankyo_sun_Packet {
             materialParams.u_Color[ColorKind.C0].a *= alpha;
             colorFromRGBA8(materialParams.u_Color[ColorKind.C1], 0xFF91491E);
 
-            submitScratchRenderInst(device, renderInstManager, this.materialHelperLenzflare, renderInst, viewerInput);
+            submitScratchRenderInst(renderInstManager, this.materialHelperLenzflare, renderInst, viewerInput);
         }
     }
 
     public draw(globals: dGlobals, renderInstManager: GfxRenderInstManager, viewerInput: ViewerRenderInput): void {
-        const device = globals.modelCache.device;
-
-        this.ddraw.beginDraw();
-        this.ddraw.allocVertices(2048);
+        this.ddraw.beginDraw(globals.modelCache.cache);
+        this.ddraw.allocPrimitives(GX.Command.DRAW_TRIANGLES, 2048);
         this.drawLenzflare(globals, this.ddraw, renderInstManager, viewerInput);
         this.drawSunMoon(globals, this.ddraw, renderInstManager, viewerInput);
-        this.ddraw.endAndUpload(renderInstManager);
+        this.ddraw.endDraw(renderInstManager);
     }
 
     public destroy(device: GfxDevice): void {
@@ -625,8 +620,6 @@ export class dKankyo_vrkumo_Packet {
     }
 
     public draw(globals: dGlobals, renderInstManager: GfxRenderInstManager, viewerInput: ViewerRenderInput): void {
-        const device = globals.modelCache.device;
-
         assert(this.textures.length > 0);
 
         const envLight = globals.g_env_light;
@@ -638,7 +631,7 @@ export class dKankyo_vrkumo_Packet {
 
         renderInstManager.setCurrentRenderInstList(globals.dlst.sky[1]);
 
-        ddraw.beginDraw();
+        ddraw.beginDraw(globals.modelCache.cache);
         ddraw.allocPrimitives(GX.Command.DRAW_QUADS, 4*3*100);
 
         colorFromRGBA(materialParams.u_Color[ColorKind.C1], 0, 0, 0, 0);
@@ -646,7 +639,7 @@ export class dKankyo_vrkumo_Packet {
         for (let textureIdx = 2; textureIdx >= 0; textureIdx--) {
             this.textures[textureIdx].fillTextureMapping(materialParams.m_TextureMapping[0]);
 
-            ddraw.begin(GX.Command.DRAW_QUADS);
+            ddraw.begin(GX.Command.DRAW_QUADS, 4 * this.instances.length);
 
             for (let i = 0; i < this.instances.length; i++) {
                 const kumo = this.instances[i];
@@ -763,10 +756,10 @@ export class dKankyo_vrkumo_Packet {
             ddraw.end();
 
             const renderInst = ddraw.makeRenderInst(renderInstManager);
-            submitScratchRenderInst(device, renderInstManager, this.materialHelper, renderInst, viewerInput);
+            submitScratchRenderInst(renderInstManager, this.materialHelper, renderInst, viewerInput);
         }
 
-        ddraw.endAndUpload(renderInstManager);
+        ddraw.endDraw(renderInstManager);
     }
 
     public destroy(device: GfxDevice): void {
@@ -829,8 +822,6 @@ export class dKankyo_rain_Packet {
     }
 
     private drawRain(globals: dGlobals, renderInstManager: GfxRenderInstManager, viewerInput: ViewerRenderInput): void {
-        const device = globals.modelCache.device;
-
         const envLight = globals.g_env_light;
         const ddraw = this.ddraw;
 
@@ -905,12 +896,10 @@ export class dKankyo_rain_Packet {
         }
 
         const renderInst = ddraw.makeRenderInst(renderInstManager);
-        submitScratchRenderInst(device, renderInstManager, this.materialHelperRain, renderInst, viewerInput);
+        submitScratchRenderInst(renderInstManager, this.materialHelperRain, renderInst, viewerInput);
     }
 
     private drawSibuki(globals: dGlobals, renderInstManager: GfxRenderInstManager, viewerInput: ViewerRenderInput): void {
-        const device = globals.modelCache.device;
-
         // Sibuki means "splash"
         const envLight = globals.g_env_light;
 
@@ -974,20 +963,19 @@ export class dKankyo_rain_Packet {
         ddraw.end();
 
         const renderInst = ddraw.makeRenderInst(renderInstManager);
-        submitScratchRenderInst(device, renderInstManager, this.materialHelperSibuki, renderInst, viewerInput);
+        submitScratchRenderInst(renderInstManager, this.materialHelperSibuki, renderInst, viewerInput);
     }
 
     public draw(globals: dGlobals, renderInstManager: GfxRenderInstManager, viewerInput: ViewerRenderInput): void {
-        const device = globals.modelCache.device;
         const envLight = globals.g_env_light;
 
         if (envLight.rainCount === 0)
             return;
 
-        this.ddraw.beginDraw();
+        this.ddraw.beginDraw(globals.modelCache.cache);
         this.drawRain(globals, renderInstManager, viewerInput);
         this.drawSibuki(globals, renderInstManager, viewerInput);
-        this.ddraw.endAndUpload(renderInstManager);
+        this.ddraw.endDraw(renderInstManager);
     }
 
     public destroy(device: GfxDevice): void {
@@ -1069,8 +1057,6 @@ export class dKankyo_wave_Packet {
     }
 
     public draw(globals: dGlobals, renderInstManager: GfxRenderInstManager, viewerInput: ViewerRenderInput): void {
-        const device = globals.modelCache.device;
-
         const envLight = globals.g_env_light;
 
         if (envLight.waveCount === 0 || envLight.waveFlatInter >= 1.0)
@@ -1089,7 +1075,7 @@ export class dKankyo_wave_Packet {
 
         dKy_GxFog_sea_set(envLight, materialParams.u_FogBlock, viewerInput.camera);
 
-        this.ddraw.beginDraw();
+        ddraw.beginDraw(globals.modelCache.cache);
         ddraw.begin(GX.Command.DRAW_QUADS, 4 * envLight.waveCount);
 
         const txc1 = 0xFA/0xFF;
@@ -1143,10 +1129,8 @@ export class dKankyo_wave_Packet {
 
         ddraw.end();
 
-        const renderInst = ddraw.makeRenderInst(renderInstManager);
-        submitScratchRenderInst(device, renderInstManager, this.materialHelper, renderInst, viewerInput);
-
-        this.ddraw.endAndUpload(renderInstManager);
+        const renderInst = ddraw.endDrawAndMakeRenderInst(renderInstManager);
+        submitScratchRenderInst(renderInstManager, this.materialHelper, renderInst, viewerInput);
     }
 
     public destroy(device: GfxDevice): void {
@@ -1214,8 +1198,6 @@ export class dKankyo_star_Packet {
     }
 
     public draw(globals: dGlobals, renderInstManager: GfxRenderInstManager, viewerInput: ViewerRenderInput): void {
-        const device = globals.modelCache.device;
-
         const envLight = globals.g_env_light;
 
         if (envLight.starCount === 0)
@@ -1230,8 +1212,8 @@ export class dKankyo_star_Packet {
 
         dKy_GxFog_sea_set(envLight, materialParams.u_FogBlock, viewerInput.camera);
 
-        this.ddraw.beginDraw();
-        ddraw.begin(GX.Command.DRAW_TRIANGLES, 4 * envLight.waveCount);
+        ddraw.beginDraw(globals.modelCache.cache);
+        ddraw.begin(GX.Command.DRAW_TRIANGLES, 6 * envLight.starCount);
 
         const star = this.instances[0];
 
@@ -1327,10 +1309,8 @@ export class dKankyo_star_Packet {
 
         ddraw.end();
 
-        const renderInst = ddraw.makeRenderInst(renderInstManager);
-        submitScratchRenderInst(device, renderInstManager, this.materialHelper, renderInst, viewerInput);
-
-        this.ddraw.endAndUpload(renderInstManager);
+        const renderInst = ddraw.endDrawAndMakeRenderInst(renderInstManager);
+        submitScratchRenderInst(renderInstManager, this.materialHelper, renderInst, viewerInput);
     }
 
     public destroy(device: GfxDevice): void {

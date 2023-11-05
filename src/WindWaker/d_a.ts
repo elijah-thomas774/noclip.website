@@ -1479,7 +1479,7 @@ export class dDlst_2DStatic_c {
         this.ddraw.setVtxDesc(GX.Attr.TEX0, true);
 
         const size = 1;
-        this.ddraw.beginDraw();
+        this.ddraw.beginDraw(cache);
         this.ddraw.begin(GX.Command.DRAW_QUADS, 4);
         this.ddraw.position3f32(-size, -size, 0);
         this.ddraw.texCoord2f32(GX.Attr.TEX0, 0, 1);
@@ -1538,7 +1538,7 @@ class dDlst_2DObject_c extends dDlst_2DBase_c {
         const tex = this.whichTex === 0 ? this.tex0 : this.tex1!;
         tex.fillTextureMapping(materialParams.m_TextureMapping[0]);
 
-        this.materialHelper.setOnRenderInst(device, renderInstManager.gfxRenderCache, renderInst);
+        this.materialHelper.setOnRenderInst(renderInstManager.gfxRenderCache, renderInst);
         this.materialHelper.allocateMaterialParamsDataOnInst(renderInst, materialParams);
         renderInst.setSamplerBindingsFromTextureMappings(materialParams.m_TextureMapping);
 
@@ -1576,7 +1576,7 @@ class dDlst_2DNumber_c extends dDlst_2DBase_c {
 
         globals.quadStatic.setOnRenderInst(template);
 
-        this.materialHelper.setOnRenderInst(device, renderInstManager.gfxRenderCache, template);
+        this.materialHelper.setOnRenderInst(renderInstManager.gfxRenderCache, template);
         this.materialHelper.allocateMaterialParamsDataOnInst(template, materialParams);
 
         let value = this.value;
@@ -2290,11 +2290,11 @@ class dCloth_packet_c {
         }
     }
 
-    private drawSide(device: GfxDevice, renderInstManager: GfxRenderInstManager, ddraw: TDDraw, front: boolean): void {
+    private drawSide(renderInstManager: GfxRenderInstManager, ddraw: TDDraw, front: boolean): void {
         this.plot(ddraw, front);
         const renderInst = ddraw.makeRenderInst(renderInstManager);
         const materialHelper = front ? this.materialHelper : this.materialHelperBack;
-        materialHelper.setOnRenderInst(device, renderInstManager.gfxRenderCache, renderInst);
+        materialHelper.setOnRenderInst(renderInstManager.gfxRenderCache, renderInst);
         renderInstManager.submitRenderInst(renderInst);
     }
 
@@ -2325,12 +2325,11 @@ class dCloth_packet_c {
         this.materialHelper.allocateDrawParamsDataOnInst(template, drawParams);
 
         const ddraw = this.ddraw;
-        const device = globals.modelCache.device;
-        ddraw.beginDraw();
+        ddraw.beginDraw(globals.modelCache.cache);
         ddraw.allocPrimitives(GX.Command.DRAW_TRIANGLE_STRIP, ((this.flyGridSize - 1) * this.hoistGridSize) * 2 * 2);
-        this.drawSide(device, renderInstManager, ddraw, true);
-        this.drawSide(device, renderInstManager, ddraw, false);
-        ddraw.endAndUpload(renderInstManager);
+        this.drawSide(renderInstManager, ddraw, true);
+        this.drawSide(renderInstManager, ddraw, false);
+        ddraw.endDraw(renderInstManager);
 
         renderInstManager.popTemplateRenderInst();
     }
@@ -2772,11 +2771,11 @@ class d_a_majuu_flag extends fopAc_ac_c {
         }
     }
 
-    private drawSide(device: GfxDevice, renderInstManager: GfxRenderInstManager, ddraw: TDDraw, front: boolean): void {
+    private drawSide(renderInstManager: GfxRenderInstManager, ddraw: TDDraw, front: boolean): void {
         this.plot(ddraw, front);
         const renderInst = ddraw.makeRenderInst(renderInstManager);
         const materialHelper = front ? this.materialHelper : this.materialHelperBack;
-        materialHelper.setOnRenderInst(device, renderInstManager.gfxRenderCache, renderInst);
+        materialHelper.setOnRenderInst(renderInstManager.gfxRenderCache, renderInst);
         renderInstManager.submitRenderInst(renderInst);
     }
 
@@ -2814,12 +2813,11 @@ class d_a_majuu_flag extends fopAc_ac_c {
         this.materialHelper.allocateDrawParamsDataOnInst(template, drawParams);
 
         const ddraw = this.ddraw;
-        const device = globals.modelCache.device;
-        ddraw.beginDraw();
+        ddraw.beginDraw(globals.modelCache.cache);
         ddraw.allocPrimitives(GX.Command.DRAW_TRIANGLE_STRIP, (11 + 9 + 7 + 5 + 3 + 1) * 2);
-        this.drawSide(device, renderInstManager, ddraw, true);
-        this.drawSide(device, renderInstManager, ddraw, false);
-        ddraw.endAndUpload(renderInstManager);
+        this.drawSide(renderInstManager, ddraw, true);
+        this.drawSide(renderInstManager, ddraw, false);
+        ddraw.endDraw(renderInstManager);
 
         renderInstManager.popTemplateRenderInst();
     }

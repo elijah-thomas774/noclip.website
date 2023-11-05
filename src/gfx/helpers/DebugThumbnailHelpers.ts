@@ -1,6 +1,6 @@
 
 import { gfxSamplerBindingNew, nArray, range } from '../platform/GfxPlatformUtil';
-import { GfxColor, GfxProgram, GfxRenderPass, GfxSamplerBinding } from '../platform/GfxPlatform';
+import { GfxColor, GfxMipFilterMode, GfxProgram, GfxRenderPass, GfxRenderPassDescriptor, GfxSampler, GfxSamplerBinding, GfxTexFilterMode, GfxWrapMode } from '../platform/GfxPlatform';
 import { GfxShaderLibrary } from './GfxShaderLibrary';
 import { preprocessProgram_GLSL } from '../shaderc/GfxShaderCompiler';
 import { fullscreenMegaState } from '../helpers/GfxMegaStateDescriptorHelpers';
@@ -11,6 +11,8 @@ import { lerp, saturate, smoothstep } from '../../MathHelpers';
 import { GfxRenderHelper } from '../render/GfxRenderHelper';
 import { GfxRenderDynamicUniformBuffer } from '../render/GfxRenderDynamicUniformBuffer';
 import { gfxDeviceNeedsFlipY } from './GfxDeviceHelpers';
+import { FormatFlags } from '../platform/GfxPlatformFormat';
+import { getFormatFlags } from '../platform/GfxPlatformFormat';
 
 interface MouseLocation {
     mouseX: number;
@@ -43,11 +45,13 @@ export interface TextDrawer {
     getScaledLineHeight(): number;
     beginDraw(): void;
     endDraw(renderInstManager: GfxRenderInstManager): void;
+    reserveString(numChars: number, strokeNum?: number): void;
     drawString(renderInstManager: GfxRenderInstManager, vw: number, vh: number, str: string, x: number, y: number, strokeWidth?: number, strokeNum?: number): void;
 }
 
 export class DebugThumbnailDrawer {
     private blitProgram: GfxProgram;
+    private blitProgramSRGB: GfxProgram;
     private anim: number[] = [];
     private textureMapping: GfxSamplerBinding[] = nArray(1, gfxSamplerBindingNew);
 
@@ -64,6 +68,27 @@ export class DebugThumbnailDrawer {
 
         const blitProgram = preprocessProgram_GLSL(device.queryVendorInfo(), GfxShaderLibrary.fullscreenVS, GfxShaderLibrary.fullscreenBlitOneTexPS);
         this.blitProgram = cache.createProgramSimple(blitProgram);
+
+        const blitProgramSRGB = preprocessProgram_GLSL(device.queryVendorInfo(), GfxShaderLibrary.fullscreenVS, `
+uniform sampler2D u_Texture;
+in vec2 v_TexCoord;
+
+void main() {
+    gl_FragColor = texture(SAMPLER_2D(u_Texture), v_TexCoord);
+    gl_FragColor.rgb = pow(gl_FragColor.rgb, vec3(1.0 / 2.2));
+}
+`);
+        this.blitProgramSRGB = cache.createProgramSimple(blitProgramSRGB);
+
+        this.textureMapping[0].gfxSampler = cache.createSampler({
+            magFilter: GfxTexFilterMode.Bilinear,
+            minFilter: GfxTexFilterMode.Bilinear,
+            mipFilter: GfxMipFilterMode.Nearest,
+            minLOD: 0,
+            maxLOD: 100,
+            wrapS: GfxWrapMode.Clamp,
+            wrapT: GfxWrapMode.Clamp,
+        });
 
         this.uniformBuffer = new GfxRenderDynamicUniformBuffer(device);
     }
@@ -97,51 +122,38 @@ export class DebugThumbnailDrawer {
         const textDrawer = this.helper.getDebugTextDrawer() as TextDrawer | null;
 
         const builderDebug = builder.getDebug();
+        const debugThumbnails = builderDebug.getDebugThumbnails();
 
-        const inputPasses = builderDebug.getPasses();
+        if (debugThumbnails.length === 0)
+            return;
 
         // Add our passes.
         const resolveTextureIDs: GfxrResolveTextureID[] = [];
-        const renderTargetIDs: GfxrRenderTargetID[] = [];
-        const debugLabels: [string, string][] = [];
 
-        for (let i = 0; i < inputPasses.length; i++) {
-            const pass = inputPasses[i];
-            const debugThumbnails = builderDebug.getPassDebugThumbnails(pass);
-            for (let j = 0; j < debugThumbnails.length; j++) {
-                if (!debugThumbnails[j])
-                    continue;
-
-                // Allocate a resolve texture.
-                const resolveTextureID = builder.resolveRenderTargetPassAttachmentSlot(pass, j);
-                const renderTargetID = builderDebug.getPassRenderTargetID(pass, j);
-                resolveTextureIDs.push(resolveTextureID);
-                renderTargetIDs.push(renderTargetID);
-
-                const passDebugName = builderDebug.getPassDebugName(pass);
-                const thumbnailDebugName = builderDebug.getRenderTargetIDDebugName(renderTargetID);
-                debugLabels.push([passDebugName, thumbnailDebugName]);
-            }
-        }
+        for (let i = 0; i < debugThumbnails.length; i++)
+            resolveTextureIDs.push(builder.resolveRenderTargetPassAttachmentSlot(debugThumbnails[i].pass, debugThumbnails[i].attachmentSlot));
 
         const desc = builder.getRenderTargetDescription(mainColorTargetID);
+
         const fullscreenRect = { x1: 0, y1: 0, x2: desc.width, y2: desc.height };
 
         const renderInst = renderInstManager.newRenderInst();
         renderInst.setBindingLayouts([{ numUniformBuffers: 0, numSamplers: 1 }]);
-        renderInst.setGfxProgram(this.blitProgram);
         renderInst.setMegaStateFlags(fullscreenMegaState);
         renderInst.drawPrimitives(3);
 
+        const thumbnailWidth = this.thumbnailWidth * window.devicePixelRatio;
+        const thumbnailHeight = this.thumbnailHeight * window.devicePixelRatio;
+
         const y2 = desc.height - this.padding;
-        const y1 = y2 - this.thumbnailHeight;
+        const y1 = y2 - thumbnailHeight;
 
         const prepareAnim = (i: number) => {
-            const thumbnailDesc = builder.getRenderTargetDescription(renderTargetIDs[i]);
+            const thumbnailDesc = builder.getRenderTargetDescription(debugThumbnails[i].renderTargetID);
 
-            const slotIndex = resolveTextureIDs.length - 1 - i;
-            const x2 = desc.width - (this.thumbnailWidth + this.padding) * slotIndex - this.padding - 50;
-            const x1 = x2 - this.thumbnailWidth;
+            const slotIndex = debugThumbnails.length - 1 - i;
+            const x2 = desc.width - (thumbnailWidth + this.padding) * slotIndex - this.padding;
+            const x1 = x2 - thumbnailWidth;
 
             const location = { x1, y1, x2, y2 };
             const t = this.adjustAnim(i, location, mouseLocation);
@@ -167,18 +179,25 @@ export class DebugThumbnailDrawer {
             template.setUniformBuffer(this.uniformBuffer);
 
             const { t, vw, vh } = anim;
-            const thumbnailDebugLabels = debugLabels[i];
+            const thumbnailDebugLabels = debugThumbnails[i].debugLabel.split('\n');
             for (let i = 0; i < thumbnailDebugLabels.length; i++) {
-                const debugStr = thumbnailDebugLabels[i];
                 textDrawer.textColor.a = lerp(0.6, 1.0, t);
                 textDrawer.setFontScale(lerp(0.5, 1.0, t));
                 const y = lerp(5, 20, t) + textDrawer.getScaledLineHeight() * i;
-                textDrawer.drawString(renderInstManager, vw, vh, debugStr, vw / 2, vh - y);
+                textDrawer.drawString(renderInstManager, vw, vh, thumbnailDebugLabels[i], vw / 2, vh - y);
             }
 
             renderInstManager.popTemplateRenderInst();
             renderInstManager.currentRenderInstList = oldRenderInstList;
             return renderInstList;
+        };
+
+        const calcBlitProgram = (desc: GfxrRenderTargetDescription) => {
+            const formatFlags = getFormatFlags(desc.pixelFormat);
+            if (!!(formatFlags & FormatFlags.sRGB))
+                return this.blitProgramSRGB;
+            else
+                return this.blitProgram;
         };
 
         const drawThumbnail = (scope: GfxrPassScope, passRenderer: GfxRenderPass, i: number, textAnimList: GfxRenderInstList | undefined, anim: ReturnType<typeof prepareAnim>) => {
@@ -188,6 +207,10 @@ export class DebugThumbnailDrawer {
             const { location, vx, vy, vw, vh } = anim;
             passRenderer.setViewport(vx, vy, vw, vh);
             passRenderer.setScissor(location.x1, location.y1, location.x2 - location.x1, location.y2 - location.y1);
+
+            const desc = builder.getRenderTargetDescription(debugThumbnails[i].renderTargetID);
+            renderInst.setGfxProgram(calcBlitProgram(desc));
+
             renderInst.setSamplerBindingsFromTextureMappings(this.textureMapping);
             renderInst.drawOnPass(renderInstManager.gfxRenderCache, passRenderer);
 
@@ -195,32 +218,36 @@ export class DebugThumbnailDrawer {
                 textAnimList.drawOnPassRenderer(renderInstManager.gfxRenderCache, passRenderer);
         };
 
-        for (let i = 0; i < resolveTextureIDs.length; i++)
+        for (let i = 0; i < debugThumbnails.length; i++)
             if (!this.anim[i])
                 this.anim[i] = 0.0;
 
-        const drawOrder = range(0, resolveTextureIDs.length);
+        const drawOrder = range(0, debugThumbnails.length);
         drawOrder.sort((a, b) => (this.anim[a] - this.anim[b]));
 
         builder.pushPass((pass) => {
             pass.setDebugName('Debug Thumbnails');
             pass.attachRenderTargetID(GfxrAttachmentSlot.Color0, mainColorTargetID);
 
-            for (let i = 0; i < resolveTextureIDs.length; i++)
+            for (let i = 0; i < debugThumbnails.length; i++)
                 pass.attachResolveTexture(resolveTextureIDs[i]);
 
             pass.exec((passRenderer, scope) => {
-                const anims = resolveTextureIDs.map((tex, i) => prepareAnim(drawOrder[i]));
+                const anims = debugThumbnails.map((tex, i) => prepareAnim(drawOrder[i]));
 
                 let textLists: GfxRenderInstList[] = [];
                 if (textDrawer !== null) {
                     textDrawer.beginDraw();
-                    textLists = resolveTextureIDs.map((tex, i) => prepareText(textDrawer, drawOrder[i], anims[i]));
+
+                    const totalNumChar = debugThumbnails.map((tex) => tex.debugLabel.length).reduce((a, b) => a + b);
+                    textDrawer.reserveString(totalNumChar);
+
+                    textLists = debugThumbnails.map((tex, i) => prepareText(textDrawer, drawOrder[i], anims[i]));
                     textDrawer.endDraw(renderInstManager);
                     this.uniformBuffer.prepareToRender();
                 }
 
-                resolveTextureIDs.forEach((tex, i) => drawThumbnail(scope, passRenderer, drawOrder[i], textLists[i], anims[i]));
+                debugThumbnails.forEach((tex, i) => drawThumbnail(scope, passRenderer, drawOrder[i], textLists[i], anims[i]));
             });
         });
     }

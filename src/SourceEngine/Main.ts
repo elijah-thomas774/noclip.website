@@ -37,15 +37,20 @@ import { dfRange, dfShow } from "../DebugFloaters";
 import { GMA } from "./GMA";
 
 export class LooseMount {
-    constructor(public path: string, public files: string[] = []) {
+    private normalizedFiles: string[];
+
+    constructor(public path: string, private files: string[]) {
+        this.normalizedFiles = this.files.map((v) => v.toLowerCase());
     }
 
     public hasEntry(resolvedPath: string): boolean {
-        return this.files.includes(resolvedPath);
+        return this.normalizedFiles.includes(resolvedPath);
     }
 
     public fetchEntryData(dataFetcher: DataFetcher, resolvedPath: string): Promise<ArrayBufferSlice> {
-        return dataFetcher.fetchData(`${this.path}/${resolvedPath}`);
+        const i = this.normalizedFiles.indexOf(resolvedPath);
+        assert(i >= 0);
+        return dataFetcher.fetchData(`${this.path}/${this.files[i]}`);
     }
 }
 
@@ -317,6 +322,11 @@ export class SkyboxRenderer {
             this.createMaterialInstance(renderContext, `skybox/${this.skyname}up`),
             this.createMaterialInstance(renderContext, `skybox/${this.skyname}dn`),
         ]);
+    }
+
+    public movement(renderContext: SourceRenderContext): void {
+        for (let i = 0; i < this.materialInstances.length; i++)
+            this.materialInstances[i].movement(renderContext);
     }
 
     public prepareToRender(renderContext: SourceRenderContext, renderInstManager: GfxRenderInstManager, view: SourceEngineView): void {
@@ -1366,6 +1376,7 @@ export class SourceWorldViewRenderer {
                 renderer.executeOnPass(passRenderer, this.mainView.mainList);
             });
         });
+        builder.pushDebugThumbnail(mainColorTargetID);
 
         if (this.drawIndirect && this.mainView.indirectList.renderInsts.length > 0) {
             builder.pushPass((pass) => {
@@ -1399,6 +1410,7 @@ export class SourceWorldViewRenderer {
                     renderer.executeOnPass(passRenderer, this.mainView.indirectList);
                 });
             });
+            builder.pushDebugThumbnail(mainColorTargetID);
         }
 
         if (this.mainView.translucentList.renderInsts.length > 0) {
@@ -1406,7 +1418,7 @@ export class SourceWorldViewRenderer {
                 pass.setDebugName('Translucent');
                 pass.attachRenderTargetID(GfxrAttachmentSlot.Color0, mainColorTargetID);
                 pass.attachRenderTargetID(GfxrAttachmentSlot.DepthStencil, mainDepthTargetID);
-                
+
                 this.lateBindTextureAttachPass(renderContext, builder, pass);
 
                 pass.exec((passRenderer, scope) => {
@@ -1415,6 +1427,7 @@ export class SourceWorldViewRenderer {
                 });
             });
         }
+        builder.pushDebugThumbnail(mainColorTargetID, `${this.name}\nFinal Output`);
 
         this.outputColorTargetID = mainColorTargetID;
         this.outputColorTextureID = null;
@@ -1699,6 +1712,9 @@ export class SourceRenderer implements SceneGfx {
 
         this.processInput();
 
+        if (this.skyboxRenderer !== null)
+            this.skyboxRenderer.movement(this.renderContext);
+
         for (let i = 0; i < this.bspRenderers.length; i++)
             this.bspRenderers[i].movement(this.renderContext);
 
@@ -1916,7 +1932,6 @@ export class SourceRenderer implements SceneGfx {
         builder.pushPass((pass) => {
             pass.setDebugName('Bloom Downsample');
             pass.attachRenderTargetID(GfxrAttachmentSlot.Color0, downsampleColorTargetID);
-            pass.pushDebugThumbnail(GfxrAttachmentSlot.Color0);
 
             const mainColorResolveTextureID = builder.resolveRenderTarget(mainColorTargetID);
             pass.attachResolveTexture(mainColorResolveTextureID);
@@ -1931,11 +1946,11 @@ export class SourceRenderer implements SceneGfx {
                 renderInst.drawOnPass(cache, passRenderer);
             });
         });
+        builder.pushDebugThumbnail(downsampleColorTargetID);
 
         builder.pushPass((pass) => {
             pass.setDebugName('Bloom Blur X');
             pass.attachRenderTargetID(GfxrAttachmentSlot.Color0, downsampleColorTargetID);
-            pass.pushDebugThumbnail(GfxrAttachmentSlot.Color0);
 
             const downsampleResolveTextureID = builder.resolveRenderTarget(downsampleColorTargetID);
             pass.attachResolveTexture(downsampleResolveTextureID);
@@ -1948,11 +1963,11 @@ export class SourceRenderer implements SceneGfx {
                 renderInst.drawOnPass(cache, passRenderer);
             });
         });
+        builder.pushDebugThumbnail(downsampleColorTargetID);
 
         builder.pushPass((pass) => {
             pass.setDebugName('Bloom Blur Y');
             pass.attachRenderTargetID(GfxrAttachmentSlot.Color0, downsampleColorTargetID);
-            pass.pushDebugThumbnail(GfxrAttachmentSlot.Color0);
 
             const downsampleResolveTextureID = builder.resolveRenderTarget(downsampleColorTargetID);
             pass.attachResolveTexture(downsampleResolveTextureID);
@@ -1965,6 +1980,7 @@ export class SourceRenderer implements SceneGfx {
                 renderInst.drawOnPass(cache, passRenderer);
             });
         });
+        builder.pushDebugThumbnail(downsampleColorTargetID);
 
         return downsampleColorTargetID;
     }

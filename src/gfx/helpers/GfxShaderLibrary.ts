@@ -66,7 +66,7 @@ vec2 CalcScaleBias(in vec2 t_Pos, in vec4 t_SB) {
 }
 `;
 
-export function makeFullscreenVS(z: number = 1.0, w: number = 1.0): string {
+export function makeFullscreenVS(z: string = `1.0`, w: string = `1.0`): string {
     return `
 out vec2 v_TexCoord;
 
@@ -76,7 +76,11 @@ void main() {
     gl_Position.xy = v_TexCoord * vec2(2) - vec2(1);
     gl_Position.zw = vec2(${z}, ${w});
 
-#ifdef GFX_VIEWPORT_ORIGIN_TL
+#if defined GFX_CLIPSPACE_NEAR_ZERO
+    gl_Position.z = (gl_Position.z + gl_Position.w) * 0.5;
+#endif
+
+#if defined GFX_VIEWPORT_ORIGIN_TL
     v_TexCoord.y = 1.0 - v_TexCoord.y;
 #endif
 }

@@ -923,7 +923,7 @@ export class JPAEmitterWorkData {
 
     public fillParticleRenderInst(device: GfxDevice, renderInstManager: GfxRenderInstManager, renderInst: GfxRenderInst): void {
         const materialHelper = this.baseEmitter.resData.materialHelper;
-        materialHelper.setOnRenderInst(device, renderInstManager.gfxRenderCache, renderInst);
+        materialHelper.setOnRenderInst(renderInstManager.gfxRenderCache, renderInst);
 
         const materialParams = this.materialParams;
         const drawParams = this.drawParams;
@@ -4064,7 +4064,7 @@ function parseResource_JPAC1_00(res: JPAResourceRaw): JPAResource {
         } else if (fourcc === 'BSP1') {
             // JPABaseShape
             // Contains particle draw settings.
-            const flags = view.getUint32(tableIdx + 0x08);
+            const flags = view.getUint32(dataBegin + 0x00);
             const shapeType: ShapeType =    (flags >>>  0) & 0x0F;
             const dirType: DirType     =    (flags >>>  4) & 0x07;
             const rotType: RotType     =    (flags >>>  7) & 0x07;

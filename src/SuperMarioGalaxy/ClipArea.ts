@@ -9,7 +9,7 @@ import { GfxrAttachmentSlot, GfxrGraphBuilder, GfxrRenderTargetDescription, Gfxr
 import { GfxRenderInst, GfxRenderInstManager } from "../gfx/render/GfxRenderInstManager";
 import { fallback, mod, nArray } from "../util";
 import { ViewerRenderInput } from "../viewer";
-import { calcRailPointPos, connectToScene, drawSimpleModel, getCamZdir, getEaseInOutValue, getEaseOutValue, getRailPointArg0, getRailPointNum, initDefaultPos, isOnSwitchAppear, isOnSwitchB, isRailReachedGoal, isValidSwitchAppear, isValidSwitchB, listenStageSwitchOnOffAppear, listenStageSwitchOnOffAppearCtrl, moveCoordAndTransToRailStartPoint, moveTransToCurrentRailPos, useStageSwitchReadAppear, useStageSwitchWriteB } from "./ActorUtil";
+import { calcNerveEaseInOutValue, calcRailPointPos, connectToScene, drawSimpleModel, getCamZdir, getEaseInOutValue, getEaseOutValue, getRailPointArg0, getRailPointNum, initDefaultPos, isOnSwitchAppear, isOnSwitchB, isRailReachedGoal, isValidSwitchAppear, isValidSwitchB, listenStageSwitchOnOffAppear, listenStageSwitchOnOffAppearCtrl, moveCoordAndTransToRailStartPoint, moveTransToCurrentRailPos, useStageSwitchReadAppear, useStageSwitchWriteB } from "./ActorUtil";
 import { getJMapInfoArg0, getJMapInfoBool, JMapInfoIter } from "./JMapInfo";
 import { dynamicSpawnZoneAndLayer, LiveActor, LiveActorGroup, makeMtxTRFromActor, ZoneAndLayer } from "./LiveActor";
 import { getObjectName, SceneObj, SceneObjHolder } from "./Main";
@@ -132,10 +132,10 @@ abstract class ClipArea<TNerve extends number = number> extends LiveActor<TNerve
         colorFromRGBA8(materialParams.u_Color[ColorKind.C0], 0x00000004);
         clipAreaHolder.materialFront.allocateMaterialParamsDataOnInst(template, materialParams);
 
-        clipAreaHolder.materialFront.setOnRenderInst(cache.device, cache, template);
+        clipAreaHolder.materialFront.setOnRenderInst(cache, template);
         this.shape.drawVolumeShape(sceneObjHolder, renderInstManager, this.baseMtx, this.scale, viewerInput.camera);
 
-        clipAreaHolder.materialBack.setOnRenderInst(cache.device, cache, template);
+        clipAreaHolder.materialBack.setOnRenderInst(cache, template);
         this.shape.drawVolumeShape(sceneObjHolder, renderInstManager, this.baseMtx, this.scale, viewerInput.camera);
 
         renderInstManager.popTemplateRenderInst();
@@ -236,11 +236,6 @@ export function createClipAreaSphere(zoneAndLayer: ZoneAndLayer, sceneObjHolder:
 
 export function requestArchivesClipAreaSphere(sceneObjHolder: SceneObjHolder): void {
     ClipAreaShapeSphere.requestArchives(sceneObjHolder);
-}
-
-function calcNerveEaseInOutValue(actor: LiveActor, minStep: number, maxStep: number, minValue: number, maxValue: number): number {
-    const t = saturate(invlerp(minStep, maxStep, actor.getNerveStep()));
-    return getEaseInOutValue(t, minValue, maxValue);
 }
 
 function calcNerveEaseOutValue(actor: LiveActor, maxStep: number, minValue: number, maxValue: number): number {
@@ -435,7 +430,7 @@ export class ClipAreaDropLaser extends LiveActor<ClipAreaDropLaserNrv> {
             return;
 
         const ddraw = this.ddraw;
-        ddraw.beginDraw();
+        ddraw.beginDraw(sceneObjHolder.modelCache.cache);
 
         getCamZdir(scratchVec3b, viewerInput.camera);
 
@@ -465,8 +460,8 @@ export class ClipAreaDropLaser extends LiveActor<ClipAreaDropLaserNrv> {
         }
         ddraw.end();
 
-        const renderInst = ddraw.endDraw(renderInstManager);
-        this.materialLaser.setOnRenderInst(renderInstManager.gfxRenderCache.device, renderInstManager.gfxRenderCache, renderInst);
+        const renderInst = ddraw.endDrawAndMakeRenderInst(renderInstManager);
+        this.materialLaser.setOnRenderInst(renderInstManager.gfxRenderCache, renderInst);
 
         colorFromRGBA8(materialParams.u_Color[ColorKind.C0], 0x0040F080);
         this.materialLaser.allocateMaterialParamsDataOnInst(renderInst, materialParams);
@@ -627,7 +622,7 @@ ${fallOutFieldDrawCommon}
 
     public override vert = `
 ${FallOutFieldDrawMaskProgram.Common}
-${GfxShaderLibrary.makeFullscreenVS(reverseDepthForDepthOffset(1.0), 1.0)}
+${GfxShaderLibrary.makeFullscreenVS(glslGenerateFloat(reverseDepthForDepthOffset(1.0)))}
 `;
 
     public override frag = `
@@ -742,7 +737,6 @@ export class FallOutFieldDraw extends NameObj {
         builder.pushPass((pass) => {
             pass.setDebugName('Clip Area Downsample 1/2');
             pass.attachRenderTargetID(GfxrAttachmentSlot.Color0, downsample2TargetID);
-            pass.pushDebugThumbnail(GfxrAttachmentSlot.Color0);
 
             pass.attachResolveTexture(clipAreaMaskTextureID);
 
@@ -754,6 +748,7 @@ export class FallOutFieldDraw extends NameObj {
                 renderInst.drawOnPass(renderInstManager.gfxRenderCache, passRenderer);
             });
         });
+        builder.pushDebugThumbnail(downsample2TargetID);
 
         builder.pushPass((pass) => {
             pass.setDebugName('Clip Area Downsample 1/4');
@@ -785,9 +780,8 @@ export class FallOutFieldDraw extends NameObj {
                 renderInst.setSamplerBindingsFromTextureMappings(this.textureMapping);
                 renderInst.drawOnPass(renderInstManager.gfxRenderCache, passRenderer);
             });
-
-            pass.pushDebugThumbnail(GfxrAttachmentSlot.Color0);
         });
+        builder.pushDebugThumbnail(downsample4TargetID);
 
         builder.pushPass((pass) => {
             pass.setDebugName('Clip Area Composite Blur');
@@ -803,9 +797,8 @@ export class FallOutFieldDraw extends NameObj {
                 renderInst.setSamplerBindingsFromTextureMappings(this.textureMapping);
                 renderInst.drawOnPass(renderInstManager.gfxRenderCache, passRenderer);
             });
-
-            pass.pushDebugThumbnail(GfxrAttachmentSlot.Color0);
         });
+        builder.pushDebugThumbnail(mainColorTargetID);
 
         builder.pushPass((pass) => {
             pass.setDebugName('Clip Area Mask');
@@ -822,6 +815,7 @@ export class FallOutFieldDraw extends NameObj {
                 renderInst.drawOnPass(renderInstManager.gfxRenderCache, passRenderer);
             });
         });
+        builder.pushDebugThumbnail(mainColorTargetID);
     }
 }
 

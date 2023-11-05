@@ -20,6 +20,8 @@ import { DepthResampler } from './depthresampler';
 import { BlurFilter } from './blur';
 import { getMatrixAxisZ } from '../MathHelpers';
 import { World } from './world';
+import { gfxDeviceNeedsFlipY } from '../gfx/helpers/GfxDeviceHelpers';
+import { SceneContext } from '../SceneBase';
 
 export interface SceneUpdateContext {
     viewerInput: Viewer.ViewerRenderInput;
@@ -30,6 +32,7 @@ export interface SceneRenderContext {
     worldToViewMtx: mat4;
     viewToWorldMtx: mat4;
     animController: SFAAnimationController;
+    flipYScale: number;
     world?: World;
 }
 
@@ -50,16 +53,11 @@ const scratchSceneParams = new SceneParams();
 const scratchDrawParams = new DrawParams();
 const scratchMaterialParams = new MaterialParams();
 
-export function setGXMaterialOnRenderInst(device: GfxDevice, renderInstManager: GfxRenderInstManager, renderInst: GfxRenderInst, materialHelper: GXMaterialHelperGfx, materialParams: MaterialParams, drawParams: DrawParams) {
-    materialHelper.setOnRenderInst(device, renderInstManager.gfxRenderCache, renderInst);
+export function setGXMaterialOnRenderInst(renderInstManager: GfxRenderInstManager, renderInst: GfxRenderInst, materialHelper: GXMaterialHelperGfx, materialParams: MaterialParams, drawParams: DrawParams) {
+    materialHelper.setOnRenderInst(renderInstManager.gfxRenderCache, renderInst);
     renderInst.setSamplerBindingsFromTextureMappings(materialParams.m_TextureMapping);
     materialHelper.allocateMaterialParamsDataOnInst(renderInst, materialParams);
     materialHelper.allocateDrawParamsDataOnInst(renderInst, drawParams);
-}
-
-export function submitScratchRenderInst(device: GfxDevice, renderInstManager: GfxRenderInstManager, renderInst: GfxRenderInst, materialHelper: GXMaterialHelperGfx, materialParams: MaterialParams, drawParams: DrawParams) {
-    setGXMaterialOnRenderInst(device, renderInstManager, renderInst, materialHelper, materialParams, drawParams);
-    renderInstManager.submitRenderInst(renderInst);
 }
 
 export class SFARenderer implements Viewer.SceneGfx {
@@ -82,11 +80,11 @@ export class SFARenderer implements Viewer.SceneGfx {
     private enableHeatShimmer: boolean = false; // TODO: set by camera triggers
     private heatShimmerMaterial: HeatShimmerMaterial | undefined = undefined;
 
-    constructor(device: GfxDevice, protected animController: SFAAnimationController, public materialFactory: MaterialFactory) {
-        this.renderHelper = new GXRenderHelperGfx(device, null, this.materialFactory.cache);
+    constructor(context: SceneContext, protected animController: SFAAnimationController, public materialFactory: MaterialFactory) {
+        this.renderHelper = new GXRenderHelperGfx(context.device, context, this.materialFactory.cache);
         this.renderHelper.renderInstManager.disableSimpleMode();
 
-        this.depthResampler = new DepthResampler(device, this.renderHelper.renderInstManager.gfxRenderCache);
+        this.depthResampler = new DepthResampler(context.device, this.renderHelper.renderInstManager.gfxRenderCache);
 
         this.shimmerddraw.setVtxDesc(GX.Attr.POS, true);
         this.shimmerddraw.setVtxDesc(GX.Attr.CLR0, true);
@@ -165,7 +163,7 @@ export class SFARenderer implements Viewer.SceneGfx {
         const a1 = (strength * 0xff) >> 8;
         const a0 = (pitchFactor * strength) >> 8;
 
-        this.shimmerddraw.beginDraw();
+        this.shimmerddraw.beginDraw(renderInstManager.gfxRenderCache);
         this.shimmerddraw.begin(GX.Command.DRAW_QUADS);
         this.shimmerddraw.position3f32(0, 0, -8);
         this.shimmerddraw.color4rgba8(GX.Attr.CLR0, 0, 0, 0, a0);
@@ -181,7 +179,7 @@ export class SFARenderer implements Viewer.SceneGfx {
         this.shimmerddraw.texCoord2f32(GX.Attr.TEX0, 0.0, 1.0);
         this.shimmerddraw.end();
 
-        const renderInst = this.shimmerddraw.makeRenderInst(renderInstManager);
+        const renderInst = this.shimmerddraw.endDrawAndMakeRenderInst(renderInstManager);
 
         if (this.heatShimmerMaterial === undefined)
             this.heatShimmerMaterial = new HeatShimmerMaterial(this.materialFactory);
@@ -197,9 +195,7 @@ export class SFARenderer implements Viewer.SceneGfx {
         this.heatShimmerMaterial!.setOnMaterialParams(scratchMaterialParams, matCtx);
 
         scratchDrawParams.clear();
-        setGXMaterialOnRenderInst(device, renderInstManager, renderInst, this.heatShimmerMaterial!.getGXMaterialHelper(), scratchMaterialParams, scratchDrawParams);
-
-        this.shimmerddraw.endAndUpload(renderInstManager);
+        setGXMaterialOnRenderInst(renderInstManager, renderInst, this.heatShimmerMaterial!.getGXMaterialHelper(), scratchMaterialParams, scratchDrawParams);
 
         renderInstManager.popTemplateRenderInst();
 
@@ -312,6 +308,7 @@ export class SFARenderer implements Viewer.SceneGfx {
             worldToViewMtx: mat4.create(),
             viewToWorldMtx: mat4.create(),
             animController: this.animController,
+            flipYScale: gfxDeviceNeedsFlipY(device) ? -1 : 1,
             world: this.world,
         };
 

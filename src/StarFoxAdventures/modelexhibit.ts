@@ -8,7 +8,7 @@ import { White } from '../Color';
 import { getDebugOverlayCanvas2D, drawWorldSpaceLine, drawWorldSpacePoint } from '../DebugJunk';
 
 import { GameInfo, SFA_GAME_INFO } from './scenes';
-import { Anim, SFAAnimationController, AnimCollection, AmapCollection, interpolateKeyframes, ModanimCollection, applyPosesToModel, applyAnimationToModel } from './animation';
+import { Anim, SFAAnimationController, AnimCollection, AmapCollection, ModanimCollection, applyAnimationToModel } from './animation';
 import { SFARenderer, SceneRenderContext } from './render';
 import { ModelFetcher, ModelInstance, ModelRenderContext } from './models';
 import { MaterialFactory } from './materials';
@@ -34,8 +34,8 @@ class ModelExhibitRenderer extends SFARenderer {
     private useGlobalAnimNum: boolean = false;
     private autogenAmap: boolean = false;
 
-    constructor(device: GfxDevice, private subdir: string, animController: SFAAnimationController, materialFactory: MaterialFactory, private texFetcher: TextureFetcher, private modelFetcher: ModelFetcher, private animColl: AnimCollection, private amapColl: AmapCollection, private modanimColl: ModanimCollection) {
-        super(device, animController, materialFactory);
+    constructor(context: SceneContext, private subdir: string, animController: SFAAnimationController, materialFactory: MaterialFactory, private texFetcher: TextureFetcher, private modelFetcher: ModelFetcher, private animColl: AnimCollection, private amapColl: AmapCollection, private modanimColl: ModanimCollection) {
+        super(context, animController, materialFactory);
     }
 
     public createPanels(): UI.Panel[] {
@@ -282,6 +282,6 @@ export class SFAModelExhibitSceneDesc implements Viewer.SceneDesc {
         const modelFetcher = await ModelFetcher.create(this.gameInfo, Promise.resolve(texFetcher), materialFactory, animController, this.modelVersion);
         await modelFetcher.loadSubdirs([this.subdir], context.dataFetcher);
 
-        return new ModelExhibitRenderer(device, this.subdir, animController, materialFactory, texFetcher, modelFetcher, animColl, amapColl, modanimColl);
+        return new ModelExhibitRenderer(context, this.subdir, animController, materialFactory, texFetcher, modelFetcher, animColl, amapColl, modanimColl);
     }
 }

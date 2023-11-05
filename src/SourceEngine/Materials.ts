@@ -24,7 +24,6 @@ import { gfxDeviceNeedsFlipY } from "../gfx/helpers/GfxDeviceHelpers";
 import { UberShaderInstanceBasic, UberShaderTemplateBasic } from "./UberShader";
 import { makeSolidColorTexture2D } from "../gfx/helpers/TextureHelpers";
 import { ParticleSystemCache } from "./ParticleSystem";
-import { HitInfo } from "../SuperMarioGalaxy/Collision";
 
 //#region Base Classes
 const scratchColor = colorNewCopy(White);
@@ -4374,7 +4373,7 @@ class Material_Sky extends BaseMaterial {
             this.paramGetTexture('$hdrcompressedtexture').fillTextureMapping(dst[0], this.paramGetInt('$frame'));
         } else if (this.type === Material_Sky_Type.Sky) {
             let texture = this.paramGetTexture('$hdrbasetexture');
-            if (texture === null)
+            if (texture.texture === null)
                 texture = assertExists(this.paramGetTexture('$basetexture'));
             texture.fillTextureMapping(dst[0], this.paramGetInt('$frame'));
         }
@@ -5642,12 +5641,18 @@ export function paramGetNum(map: ParameterMap, ref: ParameterReference): number 
 }
 
 export function paramSetNum(map: ParameterMap, ref: ParameterReference, v: number): void {
-    const param = paramLookupOptional<ParameterNumber>(map, ref);
+    const param = paramLookupOptional(map, ref);
     if (param === null) {
         // Perhaps put in a warning, but this seems to happen in live content (TF2's hwn_skeleton_blue.vmt)
         return;
     }
-    param.value = v;
+
+    if (param instanceof ParameterVector) {
+        for (let i = 0; i < param.internal.length; i++)
+            param.internal[i].value = v;
+    } else {
+        (param as ParameterNumber).value = v;
+    }
 }
 
 interface MaterialProxyFactory {

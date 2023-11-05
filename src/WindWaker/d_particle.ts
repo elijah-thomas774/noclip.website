@@ -280,7 +280,7 @@ export class dPa_waveEcallBack extends dPa_levelEcallBack {
 
         const workData = emitter.emitterManager.workData;
         const ddraw = this.ddraw;
-        ddraw.beginDraw();
+        ddraw.beginDraw(renderInstManager.gfxRenderCache);
 
         const vertsPerFan = (emitter.aliveParticlesBase.length + 1);
         ddraw.allocPrimitives(GX.Command.DRAW_TRIANGLE_FAN, vertsPerFan * this.collapsePos.length);
@@ -303,7 +303,7 @@ export class dPa_waveEcallBack extends dPa_levelEcallBack {
             ddraw.end();
         }
 
-        const renderInst = ddraw.endDraw(renderInstManager);
+        const renderInst = ddraw.endDrawAndMakeRenderInst(renderInstManager);
         renderInst.sortKey = workData.particleSortKey;
         dKy_get_seacolor(this.globals.g_env_light, workData.materialParams.u_Color[ColorKind.C0], workData.materialParams.u_Color[ColorKind.C1]);
         workData.fillParticleRenderInst(device, renderInstManager, renderInst);
@@ -380,7 +380,7 @@ export class dPa_trackEcallBack extends dPa_levelEcallBack {
 
         const workData = emitter.emitterManager.workData;
         const ddraw = this.ddraw;
-        ddraw.beginDraw();
+        ddraw.beginDraw(renderInstManager.gfxRenderCache);
         ddraw.allocPrimitives(GX.Command.DRAW_TRIANGLE_STRIP, 6 * (trackCount - 1));
 
         // Start from the back.
@@ -418,7 +418,7 @@ export class dPa_trackEcallBack extends dPa_levelEcallBack {
         indTexMtx[5] = this.indScaleY;
         indTexMtx[13] = this.indTransY * emitter.age;
 
-        const renderInst = ddraw.endDraw(renderInstManager);
+        const renderInst = ddraw.endDrawAndMakeRenderInst(renderInstManager);
         renderInst.sortKey = workData.particleSortKey;
         workData.fillParticleRenderInst(device, renderInstManager, renderInst);
         renderInstManager.submitRenderInst(renderInst);

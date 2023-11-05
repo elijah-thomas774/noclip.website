@@ -28,8 +28,8 @@ function getGfxToplogyFromCommand(cmd: GX.Command): GfxTopology {
 }
 
 abstract class TDDrawBase {
-    private vcd: GX_VtxDesc[] = [];
-    private useNBT = false;
+    protected vcd: GX_VtxDesc[] = [];
+    protected useNBT = false;
     protected loadedVertexLayout: LoadedVertexLayout | null = null;
     protected inputLayout: GfxInputLayout | null = null;
     protected vertexBuffer: GfxBuffer | null = null;
@@ -57,51 +57,28 @@ abstract class TDDrawBase {
     }
 
     public setVtxDesc(attr: GX.Attr, enabled: boolean): void {
+        assert(this.loadedVertexLayout === null);
+
         if (attr === GX.Attr._NBT) {
             attr = GX.Attr.NRM;
             this.useNBT = enabled;
         }
 
         const vcd = assertExists(this.vcd[attr]);
-
-        const type = enabled ? GX.AttrType.DIRECT : GX.AttrType.NONE;
-        if (vcd.type !== type) {
-            vcd.type = type;
-            this.dirtyInputLayout();
-        }
-    }
-
-    private dirtyInputLayout(): void {
-        this.loadedVertexLayout = null;
-        this.inputLayout = null;
-    }
-
-    protected createLoadedVertexLayout(): void {
-        if (this.loadedVertexLayout === null)
-            this.loadedVertexLayout = compileLoadedVertexLayout(this.vcd, this.useNBT);
-    }
-
-    protected createInputLayoutInternal(cache: GfxRenderCache): void {
-        if (this.inputLayout === null)
-            this.inputLayout = createInputLayout(cache, this.loadedVertexLayout!);
-    }
-
-    public createInputLayout(cache: GfxRenderCache): void {
-        this.createLoadedVertexLayout();
-        this.createInputLayoutInternal(cache);
+        vcd.type = enabled ? GX.AttrType.DIRECT : GX.AttrType.NONE;
     }
 
     protected abstract ensureIndexBufferData(newSize: number): void;
     protected abstract ensureVertexBufferData(newSize: number): void;
 
-    public allocVertices(num: number): void {
-        const vertexCount = this.currentVertex + 1 + num;
+    private allocVertices(numVertex: number): void {
+        const vertexCount = this.currentVertex + 1 + numVertex;
         const stride = this.loadedVertexLayout!.vertexBufferStrides[0];
         this.ensureVertexBufferData(vertexCount * stride);
     }
 
-    public allocPrimitives(type: GX.Command, num: number): void {
-        const vertexCount = this.currentVertex + 1 + num;
+    public allocPrimitives(type: GX.Command, numVertex: number): void {
+        const vertexCount = this.currentVertex + 1 + numVertex;
         const topology = getGfxToplogyFromCommand(type);
         const stride = this.loadedVertexLayout!.vertexBufferStrides[0];
         this.ensureVertexBufferData(vertexCount * stride);
@@ -166,12 +143,12 @@ abstract class TDDrawBase {
         this.vertexData.setUint32(offs + 0x00, colorToRGBA8(c), false);
     }
 
-    public begin(type: GX.Command, num: number | null = null): void {
+    public begin(type: GX.Command, numVertex: number | null = null): void {
         this.currentPrim = type;
         this.currentPrimVertex = -1;
 
-        if (num !== null)
-            this.allocPrimitives(type, num);
+        if (numVertex !== null)
+            this.allocPrimitives(type, numVertex);
     }
 
     public end(): void {
@@ -186,8 +163,6 @@ abstract class TDDrawBase {
 }
 
 export class TDDraw extends TDDrawBase {
-    private frequencyHint = GfxBufferFrequencyHint.Dynamic;
-
     private recreateVertexBuffer: boolean = true;
     private recreateIndexBuffer: boolean = true;
 
@@ -201,6 +176,7 @@ export class TDDraw extends TDDrawBase {
 
     protected ensureVertexBufferData(newByteSize: number): void {
         if (newByteSize > this.vertexData.byteLength) {
+            assert(this.startIndex === 0);
             const newByteSizeAligned = align(newByteSize, this.vertexData.byteLength);
             const newData = new Uint8Array(newByteSizeAligned);
             newData.set(new Uint8Array(this.vertexData.buffer));
@@ -211,36 +187,32 @@ export class TDDraw extends TDDrawBase {
 
     protected ensureIndexBufferData(newSize: number): void {
         if (newSize > this.indexData.length) {
-            const newSizeAligned = align(newSize, this.indexData.byteLength);
-            const newData = new Uint16Array(newSizeAligned);
+            assert(this.startIndex === 0);
+            const newByteSizeAligned = align(newSize, this.indexData.byteLength);
+            const newData = new Uint16Array(newByteSizeAligned);
             newData.set(this.indexData);
             this.indexData = newData;
             this.recreateIndexBuffer = true;
         }
     }
 
-    public beginDraw(): void {
-        this.createLoadedVertexLayout();
+    public beginDraw(cache: GfxRenderCache): void {
+        if (this.loadedVertexLayout === null)
+            this.loadedVertexLayout = compileLoadedVertexLayout(this.vcd, this.useNBT);
+
+        if (this.inputLayout === null)
+            this.inputLayout = createInputLayout(cache, this.loadedVertexLayout);
 
         this.currentVertex = -1;
         this.currentIndex = 0;
         this.startIndex = 0;
     }
 
-    private flushDeviceObjects(cache: GfxRenderCache): void {
-        const device = cache.device;
-
-        if ((this.recreateVertexBuffer || this.recreateIndexBuffer) && this.startIndex > 0) {
-            console.warn(`DDraw: Recreating buffers when render insts already made. This will cause illegal warnings. Use allocatePrimitives() to prevent this.`);
-            // debugger;
-        }
-
-        this.createInputLayoutInternal(cache);
-
+    private flushDeviceObjects(device: GfxDevice): void {
         if (this.recreateVertexBuffer) {
             if (this.vertexBuffer !== null)
                 device.destroyBuffer(this.vertexBuffer);
-            this.vertexBuffer = device.createBuffer((this.vertexData.byteLength + 3) >>> 2, GfxBufferUsage.Vertex, this.frequencyHint);
+            this.vertexBuffer = device.createBuffer((this.vertexData.byteLength + 3) >>> 2, GfxBufferUsage.Vertex, GfxBufferFrequencyHint.Dynamic);
             this.vertexBufferDescriptors[0].buffer = this.vertexBuffer;
             this.recreateVertexBuffer = false;
         }
@@ -248,7 +220,7 @@ export class TDDraw extends TDDrawBase {
         if (this.recreateIndexBuffer) {
             if (this.indexBuffer !== null)
                 device.destroyBuffer(this.indexBuffer);
-            this.indexBuffer = device.createBuffer((this.indexData.byteLength + 3) >>> 2, GfxBufferUsage.Index, this.frequencyHint);
+            this.indexBuffer = device.createBuffer((this.indexData.byteLength + 3) >>> 2, GfxBufferUsage.Index, GfxBufferFrequencyHint.Dynamic);
             this.indexBufferDescriptor.buffer = this.indexBuffer;
             this.recreateIndexBuffer = false;
         }
@@ -259,35 +231,27 @@ export class TDDraw extends TDDrawBase {
         renderInst.drawIndexes(this.currentIndex - this.startIndex, this.startIndex);
     }
 
-    public canMakeRenderInst(): boolean {
+    public hasIndicesToDraw(): boolean {
         return this.currentIndex > this.startIndex;
     }
 
-    public next(): void {
-        this.startIndex = this.currentIndex;
-    }
-
     public makeRenderInst(renderInstManager: GfxRenderInstManager): GfxRenderInst {
-        this.flushDeviceObjects(renderInstManager.gfxRenderCache);
+        this.flushDeviceObjects(renderInstManager.gfxRenderCache.device);
         const renderInst = renderInstManager.newRenderInst();
         this.setOnRenderInst(renderInst);
-        this.next();
+        this.startIndex = this.currentIndex;
         return renderInst;
     }
 
-    private endAndUploadCache(cache: GfxRenderCache): void {
-        const device = cache.device;
-        this.flushDeviceObjects(cache);
+    public endDraw(renderInstManager: GfxRenderInstManager): void {
+        const device = renderInstManager.gfxRenderCache.device;
+        this.flushDeviceObjects(device);
         device.uploadBufferData(this.vertexBuffer!, 0, new Uint8Array(this.vertexData.buffer));
         device.uploadBufferData(this.indexBuffer!, 0, new Uint8Array(this.indexData.buffer));
     }
 
-    public endAndUpload(renderInstManager: GfxRenderInstManager): void {
-        return this.endAndUploadCache(renderInstManager.gfxRenderCache);
-    }
-
-    public endDraw(renderInstManager: GfxRenderInstManager): GfxRenderInst {
-        this.endAndUpload(renderInstManager);
+    public endDrawAndMakeRenderInst(renderInstManager: GfxRenderInstManager): GfxRenderInst {
+        this.endDraw(renderInstManager);
         return this.makeRenderInst(renderInstManager);
     }
 
@@ -309,8 +273,6 @@ export class TDDraw extends TDDrawBase {
 // Static Draw helper for places where we might want to make TDDraw into a buffer
 // that does not change very much.
 export class TSDraw extends TDDrawBase {
-    private frequencyHint = GfxBufferFrequencyHint.Static;
-
     constructor() {
         super();
         this.vertexData = new DataView(new ArrayBuffer(0x400));
@@ -335,10 +297,12 @@ export class TSDraw extends TDDrawBase {
         }
     }
 
-    public beginDraw(): void {
+    public beginDraw(cache: GfxRenderCache): void {
         assert(this.vertexBuffer === null);
         assert(this.indexBuffer === null);
-        this.createLoadedVertexLayout();
+        assert(this.loadedVertexLayout === null);
+        this.loadedVertexLayout = compileLoadedVertexLayout(this.vcd, this.useNBT);
+        this.inputLayout = createInputLayout(cache, this.loadedVertexLayout!);
 
         this.currentVertex = -1;
         this.currentIndex = 0;
@@ -346,10 +310,9 @@ export class TSDraw extends TDDrawBase {
 
     private flushDeviceObjects(cache: GfxRenderCache): void {
         const device = cache.device;
-        this.createInputLayoutInternal(cache);
-        this.vertexBuffer = device.createBuffer((this.vertexData.byteLength + 3) >>> 2, GfxBufferUsage.Vertex, this.frequencyHint);
+        this.vertexBuffer = device.createBuffer((this.vertexData.byteLength + 3) >>> 2, GfxBufferUsage.Vertex, GfxBufferFrequencyHint.Static);
         this.vertexBufferDescriptors[0].buffer = this.vertexBuffer;
-        this.indexBuffer = device.createBuffer((this.indexData.byteLength + 3) >>> 2, GfxBufferUsage.Index, this.frequencyHint);
+        this.indexBuffer = device.createBuffer((this.indexData.byteLength + 3) >>> 2, GfxBufferUsage.Index, GfxBufferFrequencyHint.Static);
         this.indexBufferDescriptor.buffer = this.indexBuffer;
     }
 

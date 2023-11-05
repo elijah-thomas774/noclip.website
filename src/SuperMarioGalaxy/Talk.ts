@@ -64,7 +64,6 @@ class TalkNodeCtrl {
     constructor(sceneObjHolder: SceneObjHolder) {
     }
 
-    private messageKey: string;
     public createFlowNode(sceneObjHolder: SceneObjHolder, messageCtrl: TalkMessageCtrl, infoIter: JMapInfoIter, actorName: string): void {
         const messageID = assertExists(getJMapInfoMessageID(infoIter));
         const zoneName = sceneObjHolder.stageDataHolder.findPlacedStageDataHolder(infoIter)!.zoneName;
@@ -77,7 +76,6 @@ class TalkNodeCtrl {
         if (sceneData === null)
             return;
 
-        this.messageKey = messageKey;
         this.rootNode = sceneData.findNode(messageKey);
         this.currentNode = this.rootNode;
         this.tempFlowNode = this.rootNode;
@@ -156,6 +154,19 @@ class TalkNodeCtrl {
         this.updateMessage(sceneObjHolder);
     }
 
+    public recordTempFlowNode(): void {
+        this.tempFlowNode = this.currentNode;
+    }
+
+    public resetFlowNode(sceneObjHolder: SceneObjHolder): void {
+        if (this.currentNode === this.rootNode)
+            return;
+
+        this.currentNode = this.rootNode;
+        this.tempFlowNode = this.rootNode;
+        this.updateMessage(sceneObjHolder);
+    }
+
     public forwardFlowNode(sceneObjHolder: SceneObjHolder): void {
         if (this.currentNode === null)
             return;
@@ -189,7 +200,7 @@ const scratchVec3b = vec3.create();
 
 export class TalkMessageCtrl {
     private offset = vec3.create();
-    private talkNodeCtrl: TalkNodeCtrl;
+    public talkNodeCtrl: TalkNodeCtrl;
     public balloonPos = vec3.create();
     public rootNodeAutomatic = false;
     public talkState = TalkState.None;
@@ -218,6 +229,10 @@ export class TalkMessageCtrl {
         default:
             return false;
         }
+    }
+
+    public onTalkStateNone(): void {
+        this.talkState = TalkState.None;
     }
 
     public rootNodePre(sceneObjHolder: SceneObjHolder, shouldContinue: boolean): void {
@@ -477,14 +492,16 @@ export class TalkDirector extends NameObj {
     private talkCtrlPotential: TalkMessageCtrl | null = null;
     private talkCtrlCurrent: TalkMessageCtrl | null = null;
 
+    public enabled = false;
+
     constructor(sceneObjHolder: SceneObjHolder) {
         super(sceneObjHolder, 'TalkDirector');
         connectToScene(sceneObjHolder, this, MovementType.TalkDirector, CalcAnimType.None, DrawBufferType.None, DrawType.None);
     }
 
     public request(sceneObjHolder: SceneObjHolder, messageCtrl: TalkMessageCtrl, force: boolean): boolean {
-        // TODO(jstpierre): Turn this on eventually
-        return false;
+        if (!this.enabled)
+            return false;
 
         if (messageCtrl.rootNodeAutomatic)
             messageCtrl.rootNodePre(sceneObjHolder, false);
@@ -551,6 +568,17 @@ export function tryTalkNearPlayer(sceneObjHolder: SceneObjHolder, messageCtrl: T
         return talkDirector.start(sceneObjHolder, messageCtrl);
 
     return false;
+}
+
+export function resetAndForwardNode(sceneObjHolder: SceneObjHolder, talk: TalkMessageCtrl, count: number): void {
+    talk.onTalkStateNone();
+    talk.talkNodeCtrl.resetFlowNode(sceneObjHolder);
+
+    for (let i = 0; i < count; i++) {
+        talk.onTalkStateNone();
+        talk.talkNodeCtrl.forwardFlowNode(sceneObjHolder);
+        talk.talkNodeCtrl.recordTempFlowNode()
+    }
 }
 
 export function createTalkCtrl(sceneObjHolder: SceneObjHolder, host: LiveActor, infoIter: JMapInfoIter, actorName: string, offset: ReadonlyVec3 = Vec3Zero, hostMtx: ReadonlyMat4 | null): TalkMessageCtrl | null {

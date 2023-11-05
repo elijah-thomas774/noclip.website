@@ -12,7 +12,7 @@ import { Color, colorCopy, colorNewCopy, TransparentBlack, White } from "../../.
 import { vec3, vec4 } from "gl-matrix";
 import { GfxRenderInst, GfxRenderInstManager } from "../../../gfx/render/GfxRenderInstManager";
 import { TextureMapping } from "../../../TextureHolder";
-import { LayoutTextbox } from "./Layout";
+import { GfxRenderCache } from "../../../gfx/render/GfxRenderCache";
 
 const enum RFNTGlyphType {
     Glyph, Texture,
@@ -271,6 +271,7 @@ export class CharWriter {
 
     public charSpacing: number = 0;
     public lineHeight: number = 0;
+    public numVertex: number = 0;
 
     // Gradient colors
     public colorT = colorNewCopy(White);
@@ -320,10 +321,14 @@ export class CharWriter {
 
         this.cursor[0] += glyphInfo.cwdh.advanceWidth * this.scale[0];
         this.calcRectFromCursor(dst);
+
+        this.numVertex += 4;
     }
 
     public calcRect(dst: vec4, str: string, tagProcessor: TagProcessor | null = null): void {
         let needsSpacing = false;
+
+        this.numVertex = 0;
 
         dst[0] = this.cursor[0];
         dst[1] = this.cursor[1];
@@ -363,7 +368,7 @@ export class CharWriter {
 
         const s1 = (glyf.s1b + glyf.cwdh.width) * glyf.s1m;
 
-        ddraw.begin(GX.Command.DRAW_QUADS, 1);
+        ddraw.begin(GX.Command.DRAW_QUADS, 4);
 
         ddraw.position3f32(x0, y0, z);
         ddraw.color4color(GX.Attr.CLR0, this.colorT);
@@ -385,7 +390,7 @@ export class CharWriter {
     }
 
     private drawStringFlush(renderInstManager: GfxRenderInstManager, ddraw: TDDraw): void {
-        if (!ddraw.canMakeRenderInst())
+        if (!ddraw.hasIndicesToDraw())
             return;
 
         const renderInst = ddraw.makeRenderInst(renderInstManager);
@@ -428,9 +433,7 @@ export class CharWriter {
         this.cursor[0] += glyphInfo.cwdh.advanceWidth * this.scale[0];
     }
 
-    public drawString(renderInstManager: GfxRenderInstManager, ddraw: TDDraw, str: string, tagProcessor: TagProcessor | null = null): void {
-        const cache = renderInstManager.gfxRenderCache;
-
+    public drawString(renderInstManager: GfxRenderInstManager, cache: GfxRenderCache, ddraw: TDDraw, str: string, tagProcessor: TagProcessor | null = null): void {
         this.textureMapping[0].gfxSampler = cache.createSampler({
             wrapS: GfxWrapMode.Clamp,
             wrapT: GfxWrapMode.Clamp,
@@ -445,7 +448,7 @@ export class CharWriter {
         this.ddraw = ddraw;
 
         const template = renderInstManager.pushTemplateRenderInst();
-        this.font.materialHelper.setOnRenderInst(cache.device, cache, template);
+        this.font.materialHelper.setOnRenderInst(cache, template);
         this.makeMaterialUBO(template);
         this.textureMapping[0].gfxTexture = null;
 

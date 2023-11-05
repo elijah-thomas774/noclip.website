@@ -48,6 +48,7 @@ import { addBrightObj, BrightObjBase, BrightObjCheckArg } from './LensFlare';
 import { ItemBubble } from './MapObj';
 import { createModelObjBloomModel, createModelObjMapObj, createModelObjMapObjStrongLight, ModelObj } from './ModelObj';
 import { createPartsModelMapObj, PartsModel } from './PartsModel';
+import { GfxRenderCache } from '../../gfx/render/GfxRenderCache';
 
 const materialParams = new MaterialParams();
 const drawParams = new DrawParams();
@@ -482,6 +483,12 @@ export function appearCoinPopToDirection(sceneObjHolder: SceneObjHolder, host: N
     sceneObjHolder.coinHolder!.appearCoinPopToDirection(sceneObjHolder, host, position, direction, count);
 }
 
+export function appearCoinFix(sceneObjHolder: SceneObjHolder, host: NameObj, position: ReadonlyVec3, count: number): void {
+    if (sceneObjHolder.coinHolder === null)
+        return;
+    sceneObjHolder.coinHolder!.appearCoinFix(sceneObjHolder, host, position, count);
+}
+
 class CoinHostInfo {
     public declaredCount = 0;
     public aliveCount = 0;
@@ -561,9 +568,14 @@ export class CoinHolder extends LiveActorGroup<Coin> {
 
     public appearCoinPopToDirection(sceneObjHolder: SceneObjHolder, host: NameObj, position: ReadonlyVec3, direction: ReadonlyVec3, count: number): void {
         vec3.normalize(scratchVec3a, direction);
-        vec3.scale(scratchVec3a, scratchVec3a, -25.0)
+        vec3.scale(scratchVec3a, scratchVec3a, 25.0);
         const speed = count === 1 ? 0.0 : 4.0;
         this.appearCoin(sceneObjHolder, host, position, scratchVec3a, count, -1, -1, speed);
+    }
+
+    public appearCoinFix(sceneObjHolder: SceneObjHolder, host: NameObj, position: ReadonlyVec3, count: number): void {
+        const speed = count === 1 ? 0.0 : 4.0;
+        this.appearCoin(sceneObjHolder, host, position, Vec3Zero, count, -1, -1, speed);
     }
 
     public static override requestArchives(sceneObjHolder: SceneObjHolder): void {
@@ -967,7 +979,7 @@ class Coin extends LiveActor<CoinNrv> {
 
     public override scenarioChanged(sceneObjHolder: SceneObjHolder): void {
         if (!this.isPurpleCoin) {
-            const visible = sceneObjHolder.spawner.checkAliveScenario(this.zoneAndLayer) && isGalaxyDarkCometAppearInCurrentStage(sceneObjHolder);
+            const visible = sceneObjHolder.spawner.checkAliveScenario(this.zoneAndLayer) && !isGalaxyDarkCometAppearInCurrentStage(sceneObjHolder);
             this.setVisibleScenario(sceneObjHolder, visible);
         } else {
             super.scenarioChanged(sceneObjHolder);
@@ -2896,7 +2908,7 @@ class SpinDriverPathDrawer extends LiveActor {
         this.shootPath.debugDraw(sceneObjHolder);
 
         const ddraw = this.ddraw;
-        ddraw.beginDraw();
+        ddraw.beginDraw(sceneObjHolder.modelCache.cache);
 
         const width = 100;
 
@@ -2949,8 +2961,8 @@ class SpinDriverPathDrawer extends LiveActor {
         const texMtx0 = materialParams.u_TexMtx[0];
         mat4.identity(texMtx0);
 
-        const renderInst = ddraw.endDraw(renderInstManager);
-        materialHelper.setOnRenderInst(renderInstManager.gfxRenderCache.device, renderInstManager.gfxRenderCache, renderInst);
+        const renderInst = ddraw.endDrawAndMakeRenderInst(renderInstManager);
+        materialHelper.setOnRenderInst(renderInstManager.gfxRenderCache, renderInst);
         materialHelper.allocateMaterialParamsDataOnInst(renderInst, materialParams);
         renderInst.setSamplerBindingsFromTextureMappings(materialParams.m_TextureMapping);
         drawParams.clear();
@@ -3942,7 +3954,7 @@ class WarpPodPathDrawer {
         this.drawPathPart(camera, true);
     }
 
-    public draw(device: GfxDevice, renderInstManager: GfxRenderInstManager, viewerInput: Viewer.ViewerRenderInput): void {
+    public draw(cache: GfxRenderCache, renderInstManager: GfxRenderInstManager, viewerInput: Viewer.ViewerRenderInput): void {
         materialParams.clear();
         this.testColor.fillTextureMapping(materialParams.m_TextureMapping[0]);
         colorCopy(materialParams.u_Color[ColorKind.C0], this.color);
@@ -3955,11 +3967,11 @@ class WarpPodPathDrawer {
         mat4.copy(drawParams.u_PosMtx[0], viewerInput.camera.viewMatrix);
         this.materialHelper.allocateDrawParamsDataOnInst(template, drawParams);
 
-        this.materialHelper.setOnRenderInst(device, renderInstManager.gfxRenderCache, template);
+        this.materialHelper.setOnRenderInst(renderInstManager.gfxRenderCache, template);
 
-        this.ddraw.beginDraw();
+        this.ddraw.beginDraw(cache);
         this.drawPath(viewerInput.camera);
-        const renderInst = this.ddraw.endDraw(renderInstManager);
+        const renderInst = this.ddraw.endDrawAndMakeRenderInst(renderInstManager);
         renderInstManager.submitRenderInst(renderInst);
 
         renderInstManager.popTemplateRenderInst();
@@ -4132,7 +4144,7 @@ export class WarpPod extends LiveActor {
             return;
 
         if (this.pathDrawer !== null)
-            this.pathDrawer.draw(sceneObjHolder.modelCache.device, renderInstManager, viewerInput);
+            this.pathDrawer.draw(sceneObjHolder.modelCache.cache, renderInstManager, viewerInput);
     }
 
     private glowEffect(sceneObjHolder: SceneObjHolder): void {
@@ -4312,7 +4324,8 @@ export class WaterPlant extends LiveActor {
 
         const waterPlantDrawInit = sceneObjHolder.waterPlantDrawInit!;
 
-        this.ddraw.beginDraw();
+        this.ddraw.beginDraw(sceneObjHolder.modelCache.cache);
+        this.ddraw.allocPrimitives(GX.Command.DRAW_TRIANGLE_STRIP, 8);
 
         for (let i = 0; i < this.plantData.length; i++) {
             const plantData = this.plantData[i];
@@ -4325,7 +4338,6 @@ export class WaterPlant extends LiveActor {
             scratchVec3c[1] += plantData.height * 1.0;
 
             this.ddraw.begin(GX.Command.DRAW_TRIANGLE_STRIP);
-            this.ddraw.allocVertices(8);
 
             const dx = waterPlantDrawInit.drawVec[0] * 20.0;
             const dz = waterPlantDrawInit.drawVec[2] * 20.0;
@@ -4338,8 +4350,7 @@ export class WaterPlant extends LiveActor {
             this.ddraw.end();
         }
 
-        const device = sceneObjHolder.modelCache.device;
-        const renderInst = this.ddraw.endDraw(renderInstManager);
+        const renderInst = this.ddraw.endDrawAndMakeRenderInst(renderInstManager);
 
         materialParams.clear();
         waterPlantDrawInit.loadTex(materialParams.m_TextureMapping[0], this.plantType);
@@ -4348,7 +4359,7 @@ export class WaterPlant extends LiveActor {
         renderInst.setSamplerBindingsFromTextureMappings(materialParams.m_TextureMapping);
         mat4.copy(drawParams.u_PosMtx[0], viewerInput.camera.viewMatrix);
         materialHelper.allocateDrawParamsDataOnInst(renderInst, drawParams);
-        materialHelper.setOnRenderInst(device, renderInstManager.gfxRenderCache, renderInst);
+        materialHelper.setOnRenderInst(renderInstManager.gfxRenderCache, renderInst);
 
         renderInstManager.submitRenderInst(renderInst);
     }
@@ -4538,7 +4549,7 @@ export class ChooChooTrain extends LiveActor {
         this.speed = fallback(getJMapInfoArg1(infoIter), 5);
 
         for (let i = 0; i < numTrainBodies; i++) {
-            const trainBody = new ModelObj(zoneAndLayer, sceneObjHolder, 'ChooChooTrainBody', 'ChooChooTrainBody', null, -2, 0x1E, 2);
+            const trainBody = new ModelObj(zoneAndLayer, sceneObjHolder, 'ChooChooTrainBody', 'ChooChooTrainBody', null, -2, MovementType.CollisionMapObj, CalcAnimType.CollisionMapObj);
             initCollisionParts(sceneObjHolder, trainBody, 'ChooChooTrainBody', bodySensor, null);
             this.trainBodies.push(trainBody);
         }
@@ -4554,9 +4565,11 @@ export class ChooChooTrain extends LiveActor {
         for (let i = 0; i < this.trainBodies.length; i++) {
             moveCoord(this, 1080 * this.scale[1]);
             moveTransToOtherActorRailPos(this.trainBodies[i], this);
+            this.trainBodies[i].makeActorAppeared(sceneObjHolder);
             startBck(this.trainBodies[i], 'Run');
         }
 
+        reverseRailDirection(this);
         setRailCoord(this, coord);
         startBck(this, 'Run');
     }
@@ -4731,8 +4744,8 @@ export class SwingRope extends LiveActor {
     }
 
     private drawStop(sceneObjHolder: SceneObjHolder, renderInstManager: GfxRenderInstManager, viewerInput: Viewer.ViewerRenderInput): void {
-        this.ddraw.beginDraw();
-        this.ddraw.allocVertices(12);
+        this.ddraw.beginDraw(sceneObjHolder.modelCache.cache);
+        this.ddraw.allocPrimitives(GX.Command.DRAW_TRIANGLE_STRIP, 12);
 
         const ty = 0.13 * (this.height / 50.0);
 
@@ -4762,8 +4775,7 @@ export class SwingRope extends LiveActor {
         this.sendPoint(scratchVec3b, p.axisX, p.axisZ, -43.0,  -3.0, swingRopeColorMinusX, 1.0, ty);
         this.ddraw.end();
 
-        const device = sceneObjHolder.modelCache.device;
-        const renderInst = this.ddraw.endDraw(renderInstManager);
+        const renderInst = this.ddraw.endDrawAndMakeRenderInst(renderInstManager);
 
         materialParams.clear();
         const swingRopeGroup = sceneObjHolder.swingRopeGroup!;
@@ -4773,7 +4785,7 @@ export class SwingRope extends LiveActor {
         renderInst.setSamplerBindingsFromTextureMappings(materialParams.m_TextureMapping);
         mat4.copy(drawParams.u_PosMtx[0], viewerInput.camera.viewMatrix);
         materialHelper.allocateDrawParamsDataOnInst(renderInst, drawParams);
-        materialHelper.setOnRenderInst(device, renderInstManager.gfxRenderCache, renderInst);
+        materialHelper.setOnRenderInst(renderInstManager.gfxRenderCache, renderInst);
 
         renderInstManager.submitRenderInst(renderInst);
     }
@@ -4865,7 +4877,7 @@ export class Trapeze extends LiveActor {
     }
 
     private drawRope(top: vec3, bottom: vec3, axisX: vec3, axisZ: vec3, txc0: number, txc1: number): void {
-        this.ddraw.allocVertices(12);
+        this.ddraw.allocPrimitives(GX.Command.DRAW_TRIANGLE_STRIP, 12);
 
         // Rope 1.
         this.ddraw.begin(GX.Command.DRAW_TRIANGLE_STRIP);
@@ -4985,7 +4997,7 @@ export class Trapeze extends LiveActor {
         if (!isValidDraw(this))
             return;
 
-        this.ddraw.beginDraw();
+        this.ddraw.beginDraw(sceneObjHolder.modelCache.cache);
 
         // Neg
         vec3.scaleAndAdd(scratchVec3a, this.translation, this.axisX, -60.0);
@@ -4997,8 +5009,7 @@ export class Trapeze extends LiveActor {
         vec3.scaleAndAdd(scratchVec3b, this.swingRopePoint.position, this.axisX, 60.0);
         this.drawRope(scratchVec3a, scratchVec3b, this.swingRopePoint.axisX, this.swingRopePoint.axisZ, 0.0, 0.003 * this.height);
 
-        const device = sceneObjHolder.modelCache.device;
-        const renderInst = this.ddraw.endDraw(renderInstManager);
+        const renderInst = this.ddraw.endDrawAndMakeRenderInst(renderInstManager);
 
         materialParams.clear();
         const trapezeRopeDrawInit = sceneObjHolder.trapezeRopeDrawInit!;
@@ -5008,7 +5019,7 @@ export class Trapeze extends LiveActor {
         renderInst.setSamplerBindingsFromTextureMappings(materialParams.m_TextureMapping);
         mat4.copy(drawParams.u_PosMtx[0], viewerInput.camera.viewMatrix);
         materialHelper.allocateDrawParamsDataOnInst(renderInst, drawParams);
-        materialHelper.setOnRenderInst(device, renderInstManager.gfxRenderCache, renderInst);
+        materialHelper.setOnRenderInst(renderInstManager.gfxRenderCache, renderInst);
 
         renderInstManager.submitRenderInst(renderInst);
     }
@@ -5155,7 +5166,7 @@ export class Creeper extends LiveActor {
         if (!isValidDraw(this))
             return;
 
-        this.ddraw.beginDraw();
+        this.ddraw.beginDraw(sceneObjHolder.modelCache.cache);
 
         this.ddraw.begin(GX.Command.DRAW_TRIANGLE_STRIP);
         for (let i = 0; i < this.creeperPoints.length; i++) {
@@ -5184,8 +5195,7 @@ export class Creeper extends LiveActor {
         }
         this.ddraw.end();
 
-        const device = sceneObjHolder.modelCache.device;
-        const renderInst = this.ddraw.endDraw(renderInstManager);
+        const renderInst = this.ddraw.endDrawAndMakeRenderInst(renderInstManager);
 
         materialParams.clear();
         this.stalk.fillTextureMapping(materialParams.m_TextureMapping[0]);
@@ -5194,7 +5204,7 @@ export class Creeper extends LiveActor {
         renderInst.setSamplerBindingsFromTextureMappings(materialParams.m_TextureMapping);
         mat4.copy(drawParams.u_PosMtx[0], viewerInput.camera.viewMatrix);
         materialHelper.allocateDrawParamsDataOnInst(renderInst, drawParams);
-        materialHelper.setOnRenderInst(device, renderInstManager.gfxRenderCache, renderInst);
+        materialHelper.setOnRenderInst(renderInstManager.gfxRenderCache, renderInst);
 
         renderInstManager.submitRenderInst(renderInst);
     }
@@ -5329,7 +5339,7 @@ class OceanRingDrawer {
     }
 
     public draw(sceneObjHolder: SceneObjHolder, renderInstManager: GfxRenderInstManager, viewerInput: Viewer.ViewerRenderInput): void {
-        this.ddraw.beginDraw();
+        this.ddraw.beginDraw(sceneObjHolder.modelCache.cache);
 
         const p = this.oceanRing.points, pointsPerSegment = this.oceanRing.pointsPerSegment;
 
@@ -5357,8 +5367,7 @@ class OceanRingDrawer {
             this.ddraw.end();
         }
 
-        const device = sceneObjHolder.modelCache.device;
-        const renderInst = this.ddraw.endDraw(renderInstManager);
+        const renderInst = this.ddraw.endDrawAndMakeRenderInst(renderInstManager);
 
         materialParams.clear();
         this.water.fillTextureMapping(materialParams.m_TextureMapping[0]);
@@ -5379,7 +5388,7 @@ class OceanRingDrawer {
         renderInst.setSamplerBindingsFromTextureMappings(materialParams.m_TextureMapping);
         mat4.copy(drawParams.u_PosMtx[0], viewerInput.camera.viewMatrix);
         materialHelper.allocateDrawParamsDataOnInst(renderInst, drawParams);
-        materialHelper.setOnRenderInst(device, renderInstManager.gfxRenderCache, renderInst);
+        materialHelper.setOnRenderInst(renderInstManager.gfxRenderCache, renderInst);
 
         renderInstManager.submitRenderInst(renderInst);
     }
@@ -5478,7 +5487,7 @@ class OceanRingPipeOutside extends LiveActor {
         renderInst.setSamplerBindingsFromTextureMappings(materialParams.m_TextureMapping);
         mat4.copy(drawParams.u_PosMtx[0], viewerInput.camera.viewMatrix);
         materialHelper.allocateDrawParamsDataOnInst(renderInst, drawParams);
-        materialHelper.setOnRenderInst(device, renderInstManager.gfxRenderCache, renderInst);
+        materialHelper.setOnRenderInst(renderInstManager.gfxRenderCache, renderInst);
 
         renderInstManager.submitRenderInst(renderInst);
     }
@@ -5563,7 +5572,7 @@ class OceanRingPipeInside extends LiveActor {
         renderInst.setSamplerBindingsFromTextureMappings(materialParams.m_TextureMapping);
         mat4.copy(drawParams.u_PosMtx[0], viewerInput.camera.viewMatrix);
         materialHelper.allocateDrawParamsDataOnInst(renderInst, drawParams);
-        materialHelper.setOnRenderInst(device, renderInstManager.gfxRenderCache, renderInst);
+        materialHelper.setOnRenderInst(renderInstManager.gfxRenderCache, renderInst);
 
         renderInstManager.submitRenderInst(renderInst);
     }
@@ -5720,7 +5729,7 @@ class OceanRingPipe extends LiveActor {
         const vertexAttributeDescriptors: GfxVertexAttributeDescriptor[] = [
             { location: getVertexInputLocation(VertexAttributeInput.POS), format: GfxFormat.F32_RGB, bufferIndex: 0, bufferByteOffset: 0*0x04, },
             { location: getVertexInputLocation(VertexAttributeInput.NRM), format: GfxFormat.F32_RGB, bufferIndex: 0, bufferByteOffset: 3*0x04, },
-            { location: getVertexInputLocation(VertexAttributeInput.TEX01), format: GfxFormat.F32_RGBA, bufferIndex: 0, bufferByteOffset: 6*0x04, },
+            { location: getVertexInputLocation(VertexAttributeInput.TEX01), format: GfxFormat.F32_RG, bufferIndex: 0, bufferByteOffset: 6*0x04, },
         ];
         const vertexBufferDescriptors: GfxInputLayoutBufferDescriptor[] = [
             { byteStride: 8*0x04, frequency: GfxVertexBufferFrequency.PerVertex, },
@@ -6180,7 +6189,7 @@ export class Flag extends LiveActor {
         if (!isValidDraw(this))
             return;
 
-        this.ddraw.beginDraw();
+        this.ddraw.beginDraw(sceneObjHolder.modelCache.cache);
 
         for (let i = 1; i < this.fixPoints.length; i++) {
             this.ddraw.begin(GX.Command.DRAW_TRIANGLE_STRIP);
@@ -6229,8 +6238,7 @@ export class Flag extends LiveActor {
             this.ddraw.end();
         }
 
-        const device = sceneObjHolder.modelCache.device;
-        const renderInst = this.ddraw.endDraw(renderInstManager);
+        const renderInst = this.ddraw.endDrawAndMakeRenderInst(renderInstManager);
 
         materialParams.clear();
         this.texture.fillTextureMapping(materialParams.m_TextureMapping[0]);
@@ -6241,7 +6249,7 @@ export class Flag extends LiveActor {
         renderInst.setSamplerBindingsFromTextureMappings(materialParams.m_TextureMapping);
         mat4.copy(drawParams.u_PosMtx[0], viewerInput.camera.viewMatrix);
         materialHelper.allocateDrawParamsDataOnInst(renderInst, drawParams);
-        materialHelper.setOnRenderInst(device, renderInstManager.gfxRenderCache, renderInst);
+        materialHelper.setOnRenderInst(renderInstManager.gfxRenderCache, renderInst);
 
         renderInstManager.submitRenderInst(renderInst);
     }
@@ -6410,7 +6418,7 @@ export class ElectricRailHolder extends NameObj {
     public override draw(sceneObjHolder: SceneObjHolder, renderInstManager: GfxRenderInstManager, viewerInput: Viewer.ViewerRenderInput): void {
         super.draw(sceneObjHolder, renderInstManager, viewerInput);
 
-        const device = sceneObjHolder.modelCache.device, cache = renderInstManager.gfxRenderCache;
+        const cache = renderInstManager.gfxRenderCache;
         for (let i = 0; i < ElectricRailType.Count; i++) {
             const modelObj = this.models[i];
             if (modelObj === null)
@@ -6422,7 +6430,7 @@ export class ElectricRailHolder extends NameObj {
             mat4.copy(drawParams.u_PosMtx[0], viewerInput.camera.viewMatrix);
 
             const materialInstance = modelInstance.materialInstances[0];
-            materialInstance.setOnRenderInst(device, cache, template);
+            materialInstance.setOnRenderInst(cache, template);
             materialInstance.materialHelper.allocateDrawParamsDataOnInst(template, drawParams);
 
             for (let j = 0; j < this.rails.length; j++) {
@@ -6673,13 +6681,13 @@ export class ElectricRail extends LiveActor implements ElectricRailBase {
     }
 
     private drawAndUploadRail(sceneObjHolder: SceneObjHolder): void {
-        this.ddraw.beginDraw();
+        const cache = sceneObjHolder.modelCache.cache;
+        this.ddraw.beginDraw(cache);
 
         this.drawPlane(this.ddraw, this.size, this.size, -this.size, -this.size);
         this.drawPlane(this.ddraw, -this.size, this.size, this.size, -this.size);
 
-        const modelCache = sceneObjHolder.modelCache;
-        this.ddraw.endDraw(modelCache.cache);
+        this.ddraw.endDraw(cache);
     }
 
     public drawRail(sceneObjHolder: SceneObjHolder, renderInstManager: GfxRenderInstManager, materialHelper: GXMaterialHelperGfx, materialParams: MaterialParams): void {
@@ -6926,13 +6934,11 @@ export class ElectricRailMoving extends LiveActor implements ElectricRailBase {
     }
 
     private drawAndUploadRail(sceneObjHolder: SceneObjHolder): void {
-        this.ddraw.beginDraw();
-
+        const cache = sceneObjHolder.modelCache.cache;
+        this.ddraw.beginDraw(cache);
         this.drawPlane(sceneObjHolder, this.ddraw, this.size, this.size, -this.size, -this.size);
         this.drawPlane(sceneObjHolder, this.ddraw, -this.size, this.size, this.size, -this.size);
-
-        const modelCache = sceneObjHolder.modelCache;
-        this.ddraw.endDraw(modelCache.cache);
+        this.ddraw.endDraw(cache);
     }
 
     public drawRail(sceneObjHolder: SceneObjHolder, renderInstManager: GfxRenderInstManager, materialHelper: GXMaterialHelperGfx, materialParams: MaterialParams): void {
@@ -8060,13 +8066,12 @@ class AstroDomeOrbit extends LiveActor {
     }
 
     private drawOrbitPath(sceneObjHolder: SceneObjHolder, renderInstManager: GfxRenderInstManager, viewerInput: Viewer.ViewerRenderInput, ddraw: TDDraw, width: number, height: number, color: number): void {
-        const device = sceneObjHolder.modelCache.device;
-        ddraw.beginDraw();
+        ddraw.beginDraw(sceneObjHolder.modelCache.cache);
         this.drawCeiling(ddraw, width, true, height);
         this.drawCeiling(ddraw, width, false, height);
         this.drawSide(ddraw, width, true, height);
         this.drawSide(ddraw, width, false, height);
-        const renderInst = ddraw.endDraw(renderInstManager);
+        const renderInst = ddraw.endDrawAndMakeRenderInst(renderInstManager);
 
         colorFromRGBA8(materialParams.u_Color[ColorKind.MAT0], color);
 
@@ -8075,7 +8080,7 @@ class AstroDomeOrbit extends LiveActor {
         computeModelMatrixR(drawParams.u_PosMtx[0], this.rotation[0], this.rotation[1], this.rotation[2]);
         mat4.mul(drawParams.u_PosMtx[0], viewerInput.camera.viewMatrix, drawParams.u_PosMtx[0]);
         materialHelper.allocateDrawParamsDataOnInst(renderInst, drawParams);
-        materialHelper.setOnRenderInst(device, renderInstManager.gfxRenderCache, renderInst);
+        materialHelper.setOnRenderInst(renderInstManager.gfxRenderCache, renderInst);
 
         renderInstManager.submitRenderInst(renderInst);
     }
@@ -9026,16 +9031,14 @@ export class WhirlPoolAccelerator extends LiveActor {
         if (!isValidDraw(this))
             return;
 
-        const device = sceneObjHolder.modelCache.device;
-
-        this.ddraw.beginDraw();
+        this.ddraw.beginDraw(sceneObjHolder.modelCache.cache);
         this.drawPlane(this.ddraw,  0.5,  Math.SQRT1_2, -0.5,  Math.SQRT1_2, this.texCoordS + 0/6, this.texCoordS + 1/6);
         this.drawPlane(this.ddraw, -0.5,  Math.SQRT1_2, -1.0,  0.0,          this.texCoordS + 1/6, this.texCoordS + 2/6);
         this.drawPlane(this.ddraw, -1.0,  0.0,          -0.5, -Math.SQRT1_2, this.texCoordS + 2/6, this.texCoordS + 3/6);
         this.drawPlane(this.ddraw, -0.5, -Math.SQRT1_2,  0.5, -Math.SQRT1_2, this.texCoordS + 3/6, this.texCoordS + 4/6);
         this.drawPlane(this.ddraw,  0.5, -Math.SQRT1_2,  1.0,  0.0,          this.texCoordS + 4/6, this.texCoordS + 5/6);
         this.drawPlane(this.ddraw,  1.0,  0.0,           0.5,  Math.SQRT1_2, this.texCoordS + 5/6, this.texCoordS + 6/6);
-        const renderInst = this.ddraw.endDraw(renderInstManager);
+        const renderInst = this.ddraw.endDrawAndMakeRenderInst(renderInstManager);
 
         materialParams.clear();
         this.texture.fillTextureMapping(materialParams.m_TextureMapping[0]);
@@ -9048,7 +9051,7 @@ export class WhirlPoolAccelerator extends LiveActor {
         mat4.copy(drawParams.u_PosMtx[0], viewerInput.camera.viewMatrix);
         this.materialHelper.allocateDrawParamsDataOnInst(renderInst, drawParams);
 
-        this.materialHelper.setOnRenderInst(device, renderInstManager.gfxRenderCache, renderInst);
+        this.materialHelper.setOnRenderInst(renderInstManager.gfxRenderCache, renderInst);
         renderInstManager.submitRenderInst(renderInst);
     }
 

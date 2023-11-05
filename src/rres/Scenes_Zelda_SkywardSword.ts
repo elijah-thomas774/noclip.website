@@ -19,10 +19,13 @@ import { executeOnPass, hasAnyVisible, GfxRendererLayer } from '../gfx/render/Gf
 import { makeBackbufferDescSimple, pushAntialiasingPostProcessPass, standardFullClearRenderPassDescriptor } from '../gfx/helpers/RenderGraphHelpers';
 import { ColorKind } from '../gx/gx_render';
 import { SceneContext } from '../SceneBase';
-import { colorNewCopy, OpaqueBlack, TransparentBlack, White, TransparentWhite } from '../Color';
+import { colorNewCopy, OpaqueBlack, TransparentBlack, White, TransparentWhite, colorNewFromRGBA } from '../Color';
 import { GfxrAttachmentSlot } from '../gfx/render/GfxRenderGraph';
 import { gfxDeviceNeedsFlipY } from '../gfx/helpers/GfxDeviceHelpers';
 import { makeSolidColorTexture2D } from '../gfx/helpers/TextureHelpers';
+import { BTI, BTIData } from "../Common/JSYSTEM/JUTTexture";
+import { EggLightManager, parseBLIGHT } from './Egg';
+import { EggDrawPathBloom, parseBBLM } from '../MarioKartWii/PostEffect';
 
 const materialHacks: GXMaterialHacks = {
     lightingFudge: (p) => `(0.5 * (${p.ambSource} + 0.1) * ${p.matSource})`,
@@ -169,11 +172,14 @@ class SkywardSwordRenderer implements Viewer.SceneGfx {
     private renderHelper: GXRenderHelperGfx;
     private blackTexture: GfxTexture;
     private whiteTexture: GfxTexture;
+    private eggLightManager : EggLightManager;
+    private eggBloom : EggDrawPathBloom;
     public currentLayer : number = 0;
     public layerModels : MDL0ModelInstance[][] = [];
     public modelInstances: MDL0ModelInstance[] = [];
     public modelBinds: ModelToModelNodeBind_Info[] = [];
     public otherTextureHolders : RRESTextureHolder[];
+
     constructor(device: GfxDevice, public stageId: string, public systemArchive: U8.U8Archive, public objPackArchive: U8.U8Archive, public stageArchive: U8.U8Archive, public layerArchives: (U8.U8Archive)[] = [], public layerNums: number[]) {
         this.renderHelper = new GXRenderHelperGfx(device);
         this.textureHolder = new ZSSTextureHolder();
@@ -187,17 +193,35 @@ class SkywardSwordRenderer implements Viewer.SceneGfx {
 
         const systemRRES = BRRES.parse(systemArchive.findFileData('g3d/model.brres')!);
         this.textureHolder.addRRESTextures(device, systemRRES);
+        
+        // // Bringing over from mkWii
+        // const blightData = systemArchive.findFileData(`./dat/default.blight`);
+        // if (blightData !== null) {
+        //     const blightRes = parseBLIGHT(blightData);
+        //     const eggLightManager = new EggLightManager(blightRes);
+        //     this.eggLightManager = eggLightManager;
+        // }
+        // // Bloom Data : CURRENTLY UNUSED
+        // const bblmData = systemArchive.findFileData(`./dat/default.bblm`);
+        // if (bblmData !== null) {
+        //     const bblmRes = parseBBLM(bblmData);
+        //     const eggBloom = new EggDrawPathBloom(device, this.renderHelper.renderCache, bblmRes);
+        //     this.eggBloom = eggBloom;
+        // }
 
         const flipY = gfxDeviceNeedsFlipY(device);
         this.textureHolder.setTextureOverride('DummyWater', { gfxTexture: null, lateBinding: 'opaque-scene-texture', width: EFB_WIDTH, height: EFB_HEIGHT, flipY })
         // Override the "Add" textures with a black texture to prevent things from being overly bright.
         this.blackTexture = makeSolidColorTexture2D(device, TransparentBlack);
         this.whiteTexture = makeSolidColorTexture2D(device, TransparentWhite);
+        const grey = makeSolidColorTexture2D(device, colorNewFromRGBA(0.5, 0.5, 0.5, 1));
         this.textureHolder.setTextureOverride('LmChaAdd', { gfxTexture: this.blackTexture, width: 1, height: 1, flipY: false });
         this.textureHolder.setTextureOverride('LmBGAdd', { gfxTexture: this.blackTexture, width: 1, height: 1, flipY: false });
-        this.textureHolder.setTextureOverride('F200_cmn_Gradation', { gfxTexture: this.whiteTexture, width: 8, height: 64, flipY: true });
-        this.textureHolder.setTextureOverride('D200_cmn_Gradation', { gfxTexture: this.whiteTexture, width: 8, height: 64, flipY: true });
         this.textureHolder.setTextureOverride('LmChaSkin', { gfxTexture: this.blackTexture, width: 1, height: 1, flipY: false });
+        
+        // Overriding the gradation textures. This causes some scenes to be overally bright
+        this.textureHolder.setTextureOverride('F200_cmn_Gradation', { gfxTexture: this.whiteTexture, width: 1, height: 1, flipY: true });
+        this.textureHolder.setTextureOverride('D200_cmn_Gradation', { gfxTexture: this.whiteTexture, width: 1, height: 1, flipY: true });
         
         this.resourceSystem.getRRES(device, this.textureHolder, 'oarc/SkyCmn.arc');
         
@@ -379,6 +403,10 @@ class SkywardSwordRenderer implements Viewer.SceneGfx {
 
         this.animationController.setTimeInMilliseconds(viewerInput.time);
         const template = this.renderHelper.pushTemplateRenderInst();
+        
+        // if (this.eggLightManager !== null)
+        //     for (let i = 0; i < this.modelInstances.length; i++)
+        //         this.modelInstances[i].bindLightSetting(this.eggLightManager.lightSetting);
 
         fillSceneParamsDataOnTemplate(template, viewerInput);
         for (let i = 0; i < this.modelInstances.length; i++){
@@ -453,7 +481,7 @@ class SkywardSwordRenderer implements Viewer.SceneGfx {
         //                 Plight? - Pillar light? point light?
         // TODO add MassTag (Grass)
         const NO_MODEL_LIST = ['ScChang', 'MapArea', 'MapMark', 'Cam2Tag', 'EvntTag', 'CharE', 'CharD', 'Fmaker',
-        'TgReact', 'WoodTg2', 'FairyTa', 'TlpTag', 'NpcTke', 'RoAtLog', 'EffGnT', 'NpcSalS', 'SporeTg', 'Kytag',
+        'TgReact', 'WoodTg2', 'FairyTa', 'TlpTag', 'NpcTke', 'RoAtLog', 'EffGnT', 'SporeTg', 'Kytag',
         'Dowsing', 'ActTag' , 'BtlTg'  , 'V_Clip', 'SpiderL', 'StreamT', 'AutoMes', 'PotSal', 'SwrdPrj', 'GekoTag',
         'GateGnd', 'PlRsTag', 'InsctTg', 'SwTag', 'ColStp', 'NpcStr', 'SnLight', 'LBmaker', 'TgDefea', 'BcZTag', 'TouchTa', 
         'AttTag' , 'GkMgTag', 'LtSftS' , 'ClrWall', 'Message', 'DNight', 'NpcInv', 'DieTag', 'Plight', 'TgSound', 'PltChg',
@@ -1199,7 +1227,7 @@ class SkywardSwordRenderer implements Viewer.SceneGfx {
             const typeName = 'SpinPillarD101'+['A','A','B','C','A','B','C'][type];
             spawnModelFromNames('SpinPillarD101', typeName);
         }
-        // Doors
+        // DoorsF300
         else if (name === 'Door') {
             const type = params1&0x3f;
             const arcName = 'Door'+['A00','A01','C00','C01','B00','E','A02','F','H'][type];
@@ -1443,16 +1471,17 @@ class SkywardSwordRenderer implements Viewer.SceneGfx {
             let m : MDL0ModelInstance | null;
             if (![9,10,11,12,13,14,15,16,17,18,19,28,29,30,31,32,33,34].includes(type)){
                 let arcModelPair : string[] | null;
+                let translateY = 37.0;
                 switch(type) {
-                    case 0: arcModelPair = ['GetArrow', 'GetArrowBundle']; break;
-                    case 1: arcModelPair = ['GetBombSet', 'GetBombSet']; break;
-                    case 2: arcModelPair = ['GetShieldWood', 'GetShieldWood']; break;
-                    case 3: arcModelPair = ['GetShieldIron', 'GetShieldIron']; break;
-                    case 4: arcModelPair = ['GetShieldHoly', 'GetShieldHoly']; break;
-                    case 5: arcModelPair = ['GetSeedSet', 'GetSeedSet']; break;
-                    case 6: arcModelPair = ['GetSpareSeedA', 'GetSpareSeedA']; break;
-                    case 7: arcModelPair = ['GetSpareQuiverA', 'GetSpareQuiverA']; break;
-                    case 8: arcModelPair = ['GetSpareBombBagA', 'GetSpareBombBagA']; break;
+                    case 0: arcModelPair = ['GetArrow', 'GetArrowBundle']; translateY = 34; break;
+                    case 1: arcModelPair = ['GetBombSet', 'GetBombSet']; translateY = 22; break;
+                    case 2: arcModelPair = ['GetShieldWood', 'GetShieldWood']; translateY = 40; break;
+                    case 3: arcModelPair = ['GetShieldIron', 'GetShieldIron']; translateY = 36; break;
+                    case 4: arcModelPair = ['GetShieldHoly', 'GetShieldHoly']; translateY = 40; break;
+                    case 5: arcModelPair = ['GetSeedSet', 'GetSeedSet']; translateY = 22; break;
+                    case 6: arcModelPair = ['GetSpareSeedA', 'GetSpareSeedA']; translateY = 23; break;
+                    case 7: arcModelPair = ['GetSpareQuiverA', 'GetSpareQuiverA']; translateY = 30; break;
+                    case 8: arcModelPair = ['GetSpareBombBagA', 'GetSpareBombBagA']; translateY = 27; break;
                     case 20: arcModelPair = ['GetPouchB', 'GetPorchB']; break;
                     case 21: arcModelPair = ['GetPouchB', 'GetPorchB']; break;
                     case 22: arcModelPair = ['GetPouchB', 'GetPorchB']; break;
@@ -1463,6 +1492,7 @@ class SkywardSwordRenderer implements Viewer.SceneGfx {
                     case 27: arcModelPair = ['GetMedal', 'GetMedalReturn']; break;
                 }
                 const m = spawnModelFromNames(arcModelPair![0], arcModelPair![1]);
+                translateModel(m, [0, translateY, 0]);
                 scaleModelConstant(m, 1.7);
             }
         }
@@ -1473,8 +1503,8 @@ class SkywardSwordRenderer implements Viewer.SceneGfx {
             if (type === 1){
                 const rres = getOArcRRES('Douguya');
                 const m = spawnModel(rres, 'Douguya');
-                spawnModel(rres, 'Douguya_chair');
-                const chr = mergeCHR0(rres, 'Douguya_waitC', 'Douguya_F_normal');
+                // spawnModel(rres, 'Douguya_chair');
+                const chr = mergeCHR0(rres, 'Douguya_talkwait', 'Douguya_F_normal');
                 m.bindCHR0(this.animationController, chr);
             }
             // Potion Lady
@@ -2050,13 +2080,16 @@ class SkywardSwordRenderer implements Viewer.SceneGfx {
         }
         // Mogmas
         else if (name === 'NpcMoN') {
-            const type = params1&0xF;
+            const type = ((params1&0xF) > 6) ? 0 : params1&0xF;
+            let val = 2;
+            if (type == 0 || type == 4 || type == 6) val = 0;
+            else if (type == 1 || type == 3) val = 1;
             const rres = getOArcRRES('Moguma');
             const m = spawnModel(rres, 'Moguma');
             const chr = mergeCHR0(rres, 'Moguma_wait', 'Moguma_F_wait');
             m.bindCHR0(this.animationController, chr);
             const hair = spawnModel(rres, 'Moguma_hair'+['A','B','C','D','E','F','G'][type]);
-            this.modelBinds.push({model: hair, modelToBindTo: m, nodeName: 'Head'})
+            this.modelBinds.push({model: hair, modelToBindTo: m, nodeName: 'Head'});
         }
         // Mogmas
         else if (name === 'NpcMoT2') {
@@ -2408,7 +2441,6 @@ class SkywardSwordSceneDesc implements Viewer.SceneDesc {
             const systemArchive = U8.parse(systemBuffer);
             const objPackArchive = U8.parse(CX.decompress(objPackBuffer));
             const stageArchive = U8.parse(CX.decompress(stageBuffer));
-            const layerPromise : Promise<ArrayBufferSlice>[] = [];
             const layerArchives : U8.U8Archive[] = [];
 
             for (let i = 3; i < buffers.length; i++){

@@ -42,8 +42,8 @@ export function parseBBLM(buffer: ArrayBufferSlice): BBLM {
     assert(readString(buffer, 0x00, 0x04) === 'PBLM');
     const fileSize = view.getUint32(0x04);
     const version = view.getUint8(0x08);
-    assert(version === 1);
-
+    assert(version === 1 || version === 2);
+    if (version === 2) console.warn("BBLM V2 acting as V1!!");
     const thresholdAmount = view.getFloat32(0x10);
     const thresholdColor = colorNewFromRGBA8(view.getUint32(0x14));
     const compositeColor = colorNewFromRGBA8(view.getUint32(0x18));
